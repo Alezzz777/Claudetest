@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#1e88e5">
+<title>Сводка голосования</title>
+<link rel="manifest" href="manifest.json">
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #f4f6f8; color: #1f2933;
+  }
+  body { min-height: 100vh; display: flex; flex-direction: column; }
+
+  header {
+    position: sticky; top: 0; z-index: 10;
+    background: #1e88e5; color: #fff;
+    padding: 12px 14px;
+    display: flex; align-items: center; justify-content: space-between;
+    box-shadow: 0 2px 6px rgba(0,0,0,.15);
+  }
+  header h1 { margin: 0; font-size: 17px; font-weight: 600; display:flex; align-items:center; gap:8px; }
+  header a.btnlink {
+    background: rgba(255,255,255,.18); color: #fff; border: none;
+    padding: 8px 12px; border-radius: 8px; font-size: 14px;
+    text-decoration: none; display: inline-flex; align-items: center;
+  }
+  header a.btnlink:active { background: rgba(255,255,255,.32); }
+  .conn { display:inline-block; width:8px; height:8px; border-radius:50%; background:#ffca28; }
+  .conn.ok { background:#66bb6a; }
+  .conn.bad { background:#ef5350; }
+
+  main { flex: 1; padding: 14px; max-width: 900px; width: 100%; margin: 0 auto; }
+
+  .total-card {
+    background: linear-gradient(135deg, #1e88e5, #1565c0);
+    color: #fff; border-radius: 16px;
+    padding: 20px; margin-bottom: 16px;
+    box-shadow: 0 4px 12px rgba(30,136,229,.25);
+  }
+  .total-card h2 { margin: 0 0 12px; font-size: 16px; font-weight: 500; opacity: .9; }
+  .total-pct {
+    font-size: 48px; font-weight: 700; line-height: 1;
+    display: flex; align-items: baseline; gap: 8px;
+  }
+  .total-pct .lbl { font-size: 14px; font-weight: 400; opacity: .8; }
+  .total-bar { height: 12px; background: rgba(255,255,255,.25); border-radius: 6px; overflow: hidden; margin: 14px 0 12px; }
+  .total-fill { height:100%; background:#fff; width:0%; transition: width .3s ease; border-radius: 6px; }
+  .total-row {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 8px; text-align: center;
+  }
+  .total-row > div { padding: 4px; }
+  .total-row .v { font-size: 22px; font-weight: 700; }
+  .total-row .k { font-size: 11px; opacity: .85; text-transform: uppercase; letter-spacing: .3px; margin-top: 2px; }
+
+  .section-title {
+    margin: 18px 4px 10px; font-size: 13px; color: #607080;
+    text-transform: uppercase; letter-spacing: .5px;
+  }
+
+  .precinct {
+    background: #fff; border-radius: 12px; padding: 14px;
+    margin-bottom: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  }
+  .precinct-head {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+    margin-bottom: 8px;
+  }
+  .precinct-name { font-size: 16px; font-weight: 600; }
+  .precinct-pct { font-size: 18px; font-weight: 700; color: #1e88e5; }
+  .precinct-bar { height: 8px; background: #e3eaf0; border-radius: 4px; overflow: hidden; margin-bottom: 8px; }
+  .precinct-fill { height: 100%; background: linear-gradient(90deg, #43a047, #66bb6a); transition: width .3s ease; }
+  .precinct-fill.low  { background: linear-gradient(90deg, #ef5350, #ef9a9a); }
+  .precinct-fill.mid  { background: linear-gradient(90deg, #ffa726, #ffcc80); }
+  .precinct-stats {
+    display: flex; gap: 12px; font-size: 13px; color: #546e7a; flex-wrap: wrap;
+  }
+  .precinct-stats span b { color: #1f2933; }
+  .precinct-stats .voted { color: #43a047; }
+  .precinct-stats .left  { color: #e53935; }
+
+  .empty { text-align: center; padding: 40px 20px; color: #78909c; }
+
+  .updated {
+    text-align: center; color: #90a4ae; font-size: 12px;
+    margin-top: 16px; padding-bottom: 20px;
+  }
+
+  table {
+    width: 100%; border-collapse: collapse; margin-top: 10px;
+    background: #fff; border-radius: 12px; overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  }
+  th, td { padding: 10px 12px; text-align: left; font-size: 13px; border-bottom: 1px solid #eef2f5; }
+  th { background: #f4f6f8; font-weight: 600; color: #546e7a; }
+  tr:last-child td { border-bottom: 0; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+  @media (max-width: 540px) {
+    .hide-mobile { display: none; }
+    th, td { padding: 9px 8px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1><span class="conn" id="conn"></span> Сводка голосования</h1>
+  <a class="btnlink" href="index.html">← К участкам</a>
+</header>
+
+<main id="main">
+  <div class="empty">Загрузка…</div>
+</main>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  let summary = null;
+  let es = null;
+
+  function setConn(s) {
+    const el = $('conn');
+    el.classList.remove('ok','bad');
+    if (s === 'ok')  el.classList.add('ok');
+    if (s === 'bad') el.classList.add('bad');
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function fillClass(pct) {
+    if (pct < 33) return 'low';
+    if (pct < 66) return 'mid';
+    return '';
+  }
+
+  function render() {
+    if (!summary) return;
+    const m = $('main');
+    if (summary.total === 0) {
+      m.innerHTML = `<div class="empty">
+        <p style="font-size:48px; margin:0;">📋</p>
+        <h3>Нет данных</h3>
+        <p>На сервере пока нет участков и сотрудников. Создайте их на главной странице.</p>
+      </div>`;
+      return;
+    }
+
+    const precincts = summary.precincts.slice()
+      .sort((a, b) => b.pct - a.pct || a.name.localeCompare(b.name, 'ru'));
+
+    m.innerHTML = `
+      <div class="total-card">
+        <h2>Итого по всем участкам</h2>
+        <div class="total-pct">
+          ${summary.pct.toFixed(1)}<span class="lbl">% явка</span>
+        </div>
+        <div class="total-bar"><div class="total-fill" style="width:${summary.pct}%"></div></div>
+        <div class="total-row">
+          <div><div class="v">${summary.total}</div><div class="k">Всего</div></div>
+          <div><div class="v">${summary.voted}</div><div class="k">Голосовали</div></div>
+          <div><div class="v">${summary.left}</div><div class="k">Осталось</div></div>
+        </div>
+      </div>
+
+      <div class="section-title">По участкам (${precincts.length})</div>
+
+      ${precincts.map(p => `
+        <div class="precinct">
+          <div class="precinct-head">
+            <div class="precinct-name">${escapeHtml(p.name)}</div>
+            <div class="precinct-pct">${p.pct.toFixed(1)}%</div>
+          </div>
+          <div class="precinct-bar">
+            <div class="precinct-fill ${fillClass(p.pct)}" style="width:${p.pct}%"></div>
+          </div>
+          <div class="precinct-stats">
+            <span>Всего: <b>${p.total}</b></span>
+            <span class="voted">Голосовали: <b>${p.voted}</b></span>
+            <span class="left">Осталось: <b>${p.left}</b></span>
+          </div>
+        </div>
+      `).join('')}
+
+      <div class="section-title">Таблица</div>
+      <table>
+        <thead>
+          <tr>
+            <th>Участок</th>
+            <th class="num">Всего</th>
+            <th class="num">Голосовали</th>
+            <th class="num">Осталось</th>
+            <th class="num">Явка</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${precincts.map(p => `
+            <tr>
+              <td>${escapeHtml(p.name)}</td>
+              <td class="num">${p.total}</td>
+              <td class="num" style="color:#43a047">${p.voted}</td>
+              <td class="num" style="color:#e53935">${p.left}</td>
+              <td class="num"><b>${p.pct.toFixed(1)}%</b></td>
+            </tr>
+          `).join('')}
+          <tr>
+            <td><b>Итого</b></td>
+            <td class="num"><b>${summary.total}</b></td>
+            <td class="num"><b>${summary.voted}</b></td>
+            <td class="num"><b>${summary.left}</b></td>
+            <td class="num"><b>${summary.pct.toFixed(1)}%</b></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="updated">Обновлено: ${new Date(summary.updatedAt).toLocaleString('ru-RU')}</div>
+    `;
+  }
+
+  async function fetchSummary() {
+    try {
+      const r = await fetch('/api/summary');
+      summary = await r.json();
+      setConn('ok');
+      render();
+    } catch (e) {
+      setConn('bad');
+    }
+  }
+
+  function connect() {
+    if (es) { try { es.close(); } catch(e){} }
+    es = new EventSource('/api/events');
+    es.addEventListener('open', () => setConn('ok'));
+    es.addEventListener('error', () => setConn('bad'));
+    // any change → refresh summary
+    ['state','vote','precinct-added','precinct-updated','precinct-deleted'].forEach(ev => {
+      es.addEventListener(ev, fetchSummary);
+    });
+  }
+
+  fetchSummary().then(connect);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) fetchSummary();
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "name": "voting-tracker",
+  "version": "1.0.0",
+  "description": "Mobile-friendly voting tracker with server-side storage and multi-user access",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
