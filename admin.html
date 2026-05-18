@@ -391,9 +391,11 @@
       try { data = JSON.parse(String(reader.result || '')); }
       catch (err) { toast('Файл не является корректным JSON'); return; }
 
-      const list = kind === 'users' ? data.users : data.precincts;
+      const list = kind === 'users'
+        ? data.users
+        : (Array.isArray(data.nodes) ? data.nodes : data.precincts);
       if (!Array.isArray(list)) {
-        toast(`Файл не содержит ${kind === 'users' ? 'списка пользователей' : 'списка участков'}`);
+        toast(`Файл не содержит ${kind === 'users' ? 'списка пользователей' : 'списка узлов/участков'}`);
         return;
       }
       const expectedKind = 'voting-tracker-' + kind;
@@ -419,9 +421,11 @@
       stats = `В файле: <b>${list.length}</b> пользователей, из них админов: <b>${admins}</b>` +
               (data.exportedAt ? ` · экспорт: ${new Date(data.exportedAt).toLocaleString('ru-RU')}` : '');
     } else {
+      const types = {factory:0, workshop:0, precinct:0};
+      list.forEach(n => { types[n.type || 'precinct'] = (types[n.type||'precinct']||0) + 1; });
       const voters = list.reduce((s,p) => s + (Array.isArray(p.voters) ? p.voters.length : 0), 0);
       const voted  = list.reduce((s,p) => s + (Array.isArray(p.voters) ? p.voters.filter(v=>v.voted).length : 0), 0);
-      stats = `В файле: <b>${list.length}</b> участков, <b>${voters}</b> сотрудников, из них с отметкой: <b>${voted}</b>` +
+      stats = `В файле: заводов <b>${types.factory||0}</b>, цехов <b>${types.workshop||0}</b>, участков <b>${types.precinct||0}</b>, сотрудников <b>${voters}</b>, с отметкой <b>${voted}</b>` +
               (data.exportedAt ? ` · экспорт: ${new Date(data.exportedAt).toLocaleString('ru-RU')}` : '');
     }
     $('backupStats').innerHTML = stats;
@@ -455,7 +459,7 @@
     if (mode === 'replace' && !confirm('Точно заменить все данные? Действие необратимо.')) return;
 
     const path = '/api/import/' + kind;
-    const body = kind === 'users' ? { users: list, mode } : { precincts: list, mode };
+    const body = kind === 'users' ? { users: list, mode } : { nodes: list, mode };
     try {
       const r = await api('POST', path, body);
       $('backupModal').classList.remove('show');
@@ -467,8 +471,8 @@
           : `Добавлено пользователей: ${r.added}` + (r.kept ? `, пропущено существующих: ${r.kept}` : '');
       } else {
         msg = mode === 'replace'
-          ? `Состояние голосования заменено: участков ${r.total}`
-          : `Добавлено участков: ${r.added}` +
+          ? `Состояние голосования заменено: узлов ${r.total}`
+          : `Импортировано узлов: ${r.imported}` +
             (r.ownerReassigned ? `, переназначено владельцев на вас: ${r.ownerReassigned}` : '');
       }
       toast(msg);
@@ -623,7 +627,7 @@
             ${u.isAdmin ? '<span class="badge">админ</span>' : ''}
             ${u.id === me.id ? '<span class="badge me-badge">вы</span>' : ''}
           </div>
-          <div class="meta">Участков: ${u.precinctCount} · создан ${new Date(u.createdAt).toLocaleDateString('ru-RU')}</div>
+          <div class="meta">Узлов: ${u.ownedCount} · создан ${new Date(u.createdAt).toLocaleDateString('ru-RU')}</div>
           <div class="link-box">
             <code>${escapeHtml(u.link)}</code>
             <button data-copy="${u.id}">📋</button>

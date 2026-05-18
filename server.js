@@ -1,6 +1,6 @@
 // Voting tracker server — Node.js (no external deps)
 // REST API + Server-Sent Events for real-time multi-user sync
-// Users with token-based login links; precinct ownership; admin role.
+// Users with token-based login links; node hierarchy (factory/workshop/precinct).
 // Storage: data.json (atomic writes, debounced)
 
 const http = require('http');
@@ -16,9 +16,12 @@ const DATA_FILE = path.join(__dirname, 'data.json');
 const TMP_FILE  = DATA_FILE + '.tmp';
 const ADMIN_LINK_FILE = path.join(__dirname, 'admin-link.txt');
 
+const TYPES = ['factory', 'workshop', 'precinct'];
+const TYPE_LEVEL = { factory: 0, workshop: 1, precinct: 2 };
+
 let state = {
-  users: [],       // [{id, name, token, isAdmin, createdAt}]
-  precincts: [],   // [{id, name, ownerId, voters: [{id, name, voted, ts, by}]}]
+  users: [],   // [{id, name, token, isAdmin, createdAt}]
+  nodes: [],   // [{id, name, type, parentId, ownerId, voters?: [{id, name, voted, ts, by}]}]
   updatedAt: Date.now()
 };
 
@@ -26,13 +29,22 @@ function loadState() {
   try {
     if (fs.existsSync(DATA_FILE)) {
       const data = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-      state.users     = Array.isArray(data.users)     ? data.users     : [];
-      state.precincts = Array.isArray(data.precincts) ? data.precincts : [];
+      state.users = Array.isArray(data.users) ? data.users : [];
+      if (Array.isArray(data.nodes)) {
+        state.nodes = data.nodes;
+      } else if (Array.isArray(data.precincts)) {
+        // legacy migration: precincts → nodes
+        state.nodes = data.precincts.map(p => ({
+          id: p.id, name: p.name, type: 'precinct',
+          parentId: null, ownerId: p.ownerId,
+          voters: Array.isArray(p.voters) ? p.voters : []
+        }));
+      } else {
+        state.nodes = [];
+      }
       state.updatedAt = data.updatedAt || Date.now();
     }
-  } catch (e) {
-    console.error('Failed to load state:', e.message);
-  }
+  } catch (e) { console.error('Failed to load state:', e.message); }
 }
 
 let saveTimer = null;
@@ -41,7 +53,11 @@ function saveState() {
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     try {
-      fs.writeFileSync(TMP_FILE, JSON.stringify(state, null, 2));
+      fs.writeFileSync(TMP_FILE, JSON.stringify({
+        users: state.users,
+        nodes: state.nodes,
+        updatedAt: state.updatedAt
+      }, null, 2));
       fs.renameSync(TMP_FILE, DATA_FILE);
     } catch (e) { console.error('Save failed:', e.message); }
   }, 150);
@@ -51,13 +67,12 @@ function uid()   { return crypto.randomBytes(6).toString('hex'); }
 function token() { return crypto.randomBytes(18).toString('base64url'); }
 
 function bootstrap() {
-  // Ensure every precinct has ownerId — legacy data goes to first admin
   let firstAdmin = state.users.find(u => u.isAdmin);
-  if (state.precincts.some(p => !p.ownerId) && !firstAdmin) {
+  if (state.nodes.some(n => !n.ownerId) && !firstAdmin) {
     firstAdmin = { id: uid(), name: 'Администратор', token: token(), isAdmin: true, createdAt: Date.now() };
     state.users.unshift(firstAdmin);
   }
-  state.precincts.forEach(p => { if (!p.ownerId && firstAdmin) p.ownerId = firstAdmin.id; });
+  state.nodes.forEach(n => { if (!n.ownerId && firstAdmin) n.ownerId = firstAdmin.id; });
 
   if (state.users.length === 0) {
     const t = token();
@@ -72,18 +87,14 @@ function bootstrap() {
     console.log('  (также сохранена в admin-link.txt)');
     console.log('==================================================\n');
   }
-
   saveState();
 }
 
 // ---------- SSE clients ----------
-const clients = new Set(); // {res, user}
-
+const clients = new Set();
 function broadcastChange() {
   const payload = `event: change\ndata: ${JSON.stringify({ at: Date.now() })}\n\n`;
-  for (const c of clients) {
-    try { c.res.write(payload); } catch (e) {}
-  }
+  for (const c of clients) { try { c.res.write(payload); } catch (e) {} }
 }
 
 // ---------- Helpers ----------
@@ -123,59 +134,141 @@ function getAuth(req, parsed) {
   return state.users.find(u => u.token === t) || null;
 }
 
-function findPrecinct(id) { return state.precincts.find(p => p.id === id); }
+function findNode(id) { return state.nodes.find(n => n.id === id); }
 function findUser(id) { return state.users.find(u => u.id === id); }
+function childrenOf(id) { return state.nodes.filter(n => n.parentId === id); }
+function descendantsOf(id) {
+  const out = [];
+  const stack = childrenOf(id);
+  while (stack.length) {
+    const n = stack.pop();
+    out.push(n);
+    for (const c of childrenOf(n.id)) stack.push(c);
+  }
+  return out;
+}
+function ancestorsOf(node) {
+  const out = [];
+  let cur = node;
+  while (cur && cur.parentId) {
+    cur = findNode(cur.parentId);
+    if (cur) out.push(cur);
+  }
+  return out;
+}
+function pathFor(node) {
+  const out = [];
+  let cur = node;
+  while (cur) {
+    out.unshift({ id: cur.id, name: cur.name, type: cur.type });
+    cur = cur.parentId ? findNode(cur.parentId) : null;
+  }
+  return out;
+}
 
-function canEditPrecinct(user, precinct) {
-  if (!user) return false;
+function canEdit(user, node) {
+  if (!user || !node) return false;
   if (user.isAdmin) return true;
-  return precinct.ownerId === user.id;
+  let cur = node;
+  while (cur) {
+    if (cur.ownerId === user.id) return true;
+    cur = cur.parentId ? findNode(cur.parentId) : null;
+  }
+  return false;
 }
 
-function publicUser(u) {
-  return { id: u.id, name: u.name, isAdmin: !!u.isAdmin };
-}
-
+function publicUser(u) { return { id: u.id, name: u.name, isAdmin: !!u.isAdmin }; }
 function loginLink(req, t) {
   const base = PUBLIC_URL || `${req.headers['x-forwarded-proto'] || 'http'}://${req.headers.host}`;
   return `${base}/?token=${t}`;
 }
 
-function filteredPrecincts(user) {
+function validateHierarchy(type, parentId) {
+  if (!TYPES.includes(type)) return 'неизвестный тип';
+  if (type === 'factory') {
+    if (parentId) return 'у завода не может быть родителя';
+    return null;
+  }
+  if (!parentId) {
+    if (type === 'workshop') return 'цех должен быть внутри завода';
+    return null; // precinct at root allowed
+  }
+  const p = findNode(parentId);
+  if (!p) return 'родитель не найден';
+  if (TYPE_LEVEL[type] <= TYPE_LEVEL[p.type]) return `${labelOf(type)} нельзя вложить в ${labelOf(p.type)}`;
+  if (type === 'workshop' && p.type !== 'factory') return 'цех создаётся только в заводе';
+  if (type === 'precinct' && !(p.type === 'workshop' || p.type === 'factory')) {
+    return 'участок создаётся в цехе, заводе или на верхнем уровне';
+  }
+  return null;
+}
+function labelOf(t) { return { factory:'завод', workshop:'цех', precinct:'участок' }[t] || t; }
+
+function precinctStats(n) {
+  const voters = Array.isArray(n.voters) ? n.voters : [];
+  const total = voters.length;
+  const voted = voters.filter(v => v.voted).length;
+  return { total, voted, left: total - voted, pct: total ? (voted / total * 100) : 0 };
+}
+function nodeStats(n) {
+  if (n.type === 'precinct') return precinctStats(n);
+  let total = 0, voted = 0;
+  for (const d of descendantsOf(n.id)) {
+    if (d.type === 'precinct') {
+      total += (d.voters || []).length;
+      voted += (d.voters || []).filter(v => v.voted).length;
+    }
+  }
+  return { total, voted, left: total - voted, pct: total ? (voted / total * 100) : 0 };
+}
+
+function decorateNode(n) {
+  const owner = findUser(n.ownerId);
+  const out = {
+    id: n.id, name: n.name, type: n.type,
+    parentId: n.parentId || null,
+    ownerId: n.ownerId, ownerName: owner ? owner.name : null,
+    stats: nodeStats(n),
+    childrenCount: n.type === 'precinct' ? 0 : childrenOf(n.id).length,
+    path: pathFor(n)
+  };
+  if (n.type === 'precinct') out.voters = n.voters || [];
+  return out;
+}
+
+function visibleNodes(user) {
   if (!user) return [];
-  const own = user.isAdmin
-    ? state.precincts
-    : state.precincts.filter(p => p.ownerId === user.id);
-  // attach owner name for UI
-  return own.map(p => ({
-    ...p,
-    ownerName: state.users.find(u => u.id === p.ownerId)?.name || '—'
-  }));
+  if (user.isAdmin) return state.nodes;
+  const owned = state.nodes.filter(n => n.ownerId === user.id);
+  const visible = new Set();
+  for (const n of owned) {
+    visible.add(n.id);
+    for (const a of ancestorsOf(n)) visible.add(a.id);
+    for (const d of descendantsOf(n.id)) visible.add(d.id);
+  }
+  return state.nodes.filter(n => visible.has(n.id));
 }
 
 function summary(user) {
-  // Admin sees full summary; regular user — only own precincts
-  const list = user.isAdmin
-    ? state.precincts
-    : state.precincts.filter(p => p.ownerId === user.id);
-
-  let total = 0, voted = 0;
-  const precincts = list.map(p => {
-    const t = p.voters.length;
-    const v = p.voters.filter(x => x.voted).length;
-    total += t; voted += v;
+  const list = user.isAdmin ? state.nodes : visibleNodes(user);
+  const precincts = list.filter(n => n.type === 'precinct').map(p => {
+    const s = precinctStats(p);
     return {
-      id: p.id, name: p.name,
-      ownerName: state.users.find(u => u.id === p.ownerId)?.name || '—',
-      total: t, voted: v, left: t - v,
-      pct: t ? (v / t * 100) : 0
+      id: p.id, name: p.name, ownerName: findUser(p.ownerId)?.name || '—',
+      path: pathFor(p),
+      total: s.total, voted: s.voted, left: s.left, pct: s.pct
     };
   });
+  let total = 0, voted = 0;
+  precincts.forEach(p => { total += p.total; voted += p.voted; });
+  // also factories rollup for admin
+  const factories = list.filter(n => n.type === 'factory').map(f => {
+    const s = nodeStats(f);
+    return { id: f.id, name: f.name, total: s.total, voted: s.voted, left: s.left, pct: s.pct };
+  });
   return {
-    total, voted, left: total - voted,
-    pct: total ? (voted / total * 100) : 0,
-    precincts,
-    updatedAt: state.updatedAt
+    total, voted, left: total - voted, pct: total ? (voted/total*100) : 0,
+    precincts, factories, updatedAt: state.updatedAt
   };
 }
 
@@ -189,7 +282,6 @@ const STATIC = {
   '/admin.html':    { file: 'admin.html',   type: 'text/html; charset=utf-8' },
   '/manifest.json': { file: 'manifest.json',type: 'application/manifest+json' }
 };
-
 function serveStatic(res, entry) {
   fs.readFile(path.join(__dirname, entry.file), (err, data) => {
     if (err) return send(res, 404, 'Not found');
@@ -204,7 +296,6 @@ async function handleApi(req, res, parsed) {
   const m = req.method;
   const user = getAuth(req, parsed);
 
-  // SSE (token via query)
   if (m === 'GET' && p === '/api/events') {
     if (!user) return send(res, 401, { error: 'unauthorized' });
     res.writeHead(200, {
@@ -222,19 +313,16 @@ async function handleApi(req, res, parsed) {
     return;
   }
 
-  // Public: who am I
   if (m === 'GET' && p === '/api/me') {
     if (!user) return send(res, 401, { error: 'unauthorized' });
     return send(res, 200, publicUser(user));
   }
 
-  // Everything below requires auth
   if (!user) return send(res, 401, { error: 'unauthorized' });
 
-  // Filtered state for current user
   if (m === 'GET' && p === '/api/state') {
     return send(res, 200, {
-      precincts: filteredPrecincts(user),
+      nodes: visibleNodes(user).map(decorateNode),
       user: publicUser(user),
       updatedAt: state.updatedAt
     });
@@ -244,31 +332,21 @@ async function handleApi(req, res, parsed) {
     return send(res, 200, summary(user));
   }
 
-  // ---------- Users (admin only) ----------
+  // ---------- Users ----------
   if (p === '/api/users/bulk' && m === 'POST') {
     if (!user.isAdmin) return send(res, 403, { error: 'forbidden' });
     const body = await readBody(req);
     const items = Array.isArray(body.users) ? body.users : [];
     const existingByName = new Map(state.users.map(u => [u.name.toLowerCase(), u]));
-    const created = [];
-    const skipped = [];
+    const created = []; const skipped = [];
     for (const it of items) {
       const name = String(it && it.name || '').trim();
       if (!name) continue;
-      if (existingByName.has(name.toLowerCase())) {
-        skipped.push(name);
-        continue;
-      }
-      const u = {
-        id: uid(), name, token: token(),
-        isAdmin: !!(it && it.isAdmin), createdAt: Date.now()
-      };
+      if (existingByName.has(name.toLowerCase())) { skipped.push(name); continue; }
+      const u = { id: uid(), name, token: token(), isAdmin: !!(it && it.isAdmin), createdAt: Date.now() };
       state.users.push(u);
       existingByName.set(name.toLowerCase(), u);
-      created.push({
-        ...publicUser(u), token: u.token,
-        link: loginLink(req, u.token), createdAt: u.createdAt
-      });
+      created.push({ ...publicUser(u), token: u.token, link: loginLink(req, u.token), createdAt: u.createdAt });
     }
     if (created.length) { saveState(); broadcastChange(); }
     return send(res, 200, { created, skipped });
@@ -282,33 +360,25 @@ async function handleApi(req, res, parsed) {
         token: u.token,
         link: loginLink(req, u.token),
         createdAt: u.createdAt,
-        precinctCount: state.precincts.filter(p => p.ownerId === u.id).length
+        ownedCount: state.nodes.filter(n => n.ownerId === u.id).length
       })));
     }
     if (m === 'POST') {
       const body = await readBody(req);
       const name = String(body.name || '').trim();
       if (!name) return send(res, 400, { error: 'name required' });
-      const u = {
-        id: uid(), name, token: token(),
-        isAdmin: !!body.isAdmin, createdAt: Date.now()
-      };
+      const u = { id: uid(), name, token: token(), isAdmin: !!body.isAdmin, createdAt: Date.now() };
       state.users.push(u);
-      saveState();
-      broadcastChange();
-      return send(res, 200, {
-        ...publicUser(u), token: u.token, link: loginLink(req, u.token), createdAt: u.createdAt
-      });
+      saveState(); broadcastChange();
+      return send(res, 200, { ...publicUser(u), token: u.token, link: loginLink(req, u.token), createdAt: u.createdAt });
     }
   }
 
   let mm = p.match(/^\/api\/users\/([^/]+)$/);
   if (mm) {
     if (!user.isAdmin) return send(res, 403, { error: 'forbidden' });
-    const id = mm[1];
-    const u = findUser(id);
+    const u = findUser(mm[1]);
     if (!u) return send(res, 404, { error: 'user not found' });
-
     if (m === 'PUT') {
       const body = await readBody(req);
       if (typeof body.name === 'string') {
@@ -325,14 +395,12 @@ async function handleApi(req, res, parsed) {
       saveState(); broadcastChange();
       return send(res, 200, publicUser(u));
     }
-
     if (m === 'DELETE') {
       if (u.isAdmin && state.users.filter(x => x.isAdmin).length === 1) {
         return send(res, 400, { error: 'нельзя удалить единственного администратора' });
       }
-      // Reassign their precincts to the admin who deletes them
-      state.precincts.forEach(p => { if (p.ownerId === id) p.ownerId = user.id; });
-      state.users = state.users.filter(x => x.id !== id);
+      state.nodes.forEach(n => { if (n.ownerId === u.id) n.ownerId = user.id; });
+      state.users = state.users.filter(x => x.id !== u.id);
       saveState(); broadcastChange();
       return send(res, 200, { ok: true });
     }
@@ -348,102 +416,132 @@ async function handleApi(req, res, parsed) {
     return send(res, 200, { token: u.token, link: loginLink(req, u.token) });
   }
 
-  // ---------- Precincts ----------
-  if (p === '/api/precincts' && m === 'POST') {
+  // ---------- Nodes ----------
+  if (p === '/api/nodes' && m === 'POST') {
     const body = await readBody(req);
+    const type = body.type;
     const name = String(body.name || '').trim();
     if (!name) return send(res, 400, { error: 'name required' });
+    const parentId = body.parentId || null;
+    const vErr = validateHierarchy(type, parentId);
+    if (vErr) return send(res, 400, { error: vErr });
+
+    if (parentId) {
+      const p2 = findNode(parentId);
+      if (!canEdit(user, p2)) return send(res, 403, { error: 'forbidden (parent)' });
+    } else if (!user.isAdmin && (type === 'factory' || type === 'workshop')) {
+      return send(res, 403, { error: `создавать ${labelOf(type)} на верхнем уровне может только администратор` });
+    }
+
     const ownerId = (user.isAdmin && body.ownerId) ? String(body.ownerId) : user.id;
     if (!findUser(ownerId)) return send(res, 400, { error: 'unknown owner' });
-    const voters = Array.isArray(body.voters) ? body.voters : [];
-    const precinct = {
-      id: uid(),
-      name,
-      ownerId,
-      voters: voters
-        .map(n => String(n).trim()).filter(Boolean)
-        .map(name => ({ id: uid(), name, voted: false, ts: null, by: null }))
-    };
-    state.precincts.push(precinct);
+
+    const node = { id: uid(), name, type, parentId, ownerId };
+    if (type === 'precinct') {
+      const voters = Array.isArray(body.voters) ? body.voters : [];
+      node.voters = voters.map(s => String(s).trim()).filter(Boolean)
+        .map(nm => ({ id: uid(), name: nm, voted: false, ts: null, by: null }));
+    }
+    state.nodes.push(node);
     saveState(); broadcastChange();
-    return send(res, 200, precinct);
+    return send(res, 200, decorateNode(node));
   }
 
-  mm = p.match(/^\/api\/precincts\/([^/]+)$/);
+  mm = p.match(/^\/api\/nodes\/([^/]+)$/);
   if (mm) {
     const id = mm[1];
-    const pr = findPrecinct(id);
-    if (!pr) return send(res, 404, { error: 'precinct not found' });
-    if (!canEditPrecinct(user, pr)) return send(res, 403, { error: 'forbidden' });
+    const node = findNode(id);
+    if (!node) return send(res, 404, { error: 'node not found' });
+    if (!canEdit(user, node)) return send(res, 403, { error: 'forbidden' });
 
-    if (m === 'GET') return send(res, 200, pr);
+    if (m === 'GET') return send(res, 200, decorateNode(node));
 
     if (m === 'PUT') {
       const body = await readBody(req);
       if (typeof body.name === 'string') {
         const nm = body.name.trim();
         if (!nm) return send(res, 400, { error: 'name required' });
-        pr.name = nm;
+        node.name = nm;
       }
       if (user.isAdmin && typeof body.ownerId === 'string') {
         if (!findUser(body.ownerId)) return send(res, 400, { error: 'unknown owner' });
-        pr.ownerId = body.ownerId;
+        node.ownerId = body.ownerId;
       }
-      if (Array.isArray(body.voters)) {
-        const existing = new Map(pr.voters.map(v => [v.name, v]));
-        pr.voters = body.voters
+      if (user.isAdmin && body.parentId !== undefined) {
+        const newParent = body.parentId || null;
+        if (newParent === node.id) return send(res, 400, { error: 'нельзя сделать узел родителем самому себе' });
+        if (newParent) {
+          if (descendantsOf(node.id).some(d => d.id === newParent)) {
+            return send(res, 400, { error: 'нельзя перенести в собственного потомка' });
+          }
+        }
+        const vErr = validateHierarchy(node.type, newParent);
+        if (vErr) return send(res, 400, { error: vErr });
+        node.parentId = newParent;
+      }
+      if (node.type === 'precinct' && Array.isArray(body.voters)) {
+        const existing = new Map((node.voters || []).map(v => [v.name, v]));
+        node.voters = body.voters
           .map(n => String(n).trim()).filter(Boolean)
-          .map(name => existing.get(name) || { id: uid(), name, voted: false, ts: null, by: null });
+          .map(nm => existing.get(nm) || { id: uid(), name: nm, voted: false, ts: null, by: null });
       }
       saveState(); broadcastChange();
-      return send(res, 200, pr);
+      return send(res, 200, decorateNode(node));
     }
 
     if (m === 'DELETE') {
-      state.precincts = state.precincts.filter(x => x.id !== id);
+      const subtreeIds = new Set([node.id, ...descendantsOf(node.id).map(n => n.id)]);
+      state.nodes = state.nodes.filter(n => !subtreeIds.has(n.id));
       saveState(); broadcastChange();
-      return send(res, 200, { ok: true });
+      return send(res, 200, { ok: true, removed: subtreeIds.size });
     }
   }
 
-  mm = p.match(/^\/api\/precincts\/([^/]+)\/voters\/([^/]+)\/vote$/);
+  mm = p.match(/^\/api\/nodes\/([^/]+)\/voters\/([^/]+)\/vote$/);
   if (mm && m === 'POST') {
-    const pr = findPrecinct(mm[1]);
-    if (!pr) return send(res, 404, { error: 'precinct not found' });
-    if (!canEditPrecinct(user, pr)) return send(res, 403, { error: 'forbidden' });
-    const v = pr.voters.find(x => x.id === mm[2]);
+    const node = findNode(mm[1]);
+    if (!node) return send(res, 404, { error: 'node not found' });
+    if (node.type !== 'precinct') return send(res, 400, { error: 'голосование возможно только на участке' });
+    if (!canEdit(user, node)) return send(res, 403, { error: 'forbidden' });
+    const v = (node.voters || []).find(x => x.id === mm[2]);
     if (!v) return send(res, 404, { error: 'voter not found' });
     const body = await readBody(req).catch(() => ({}));
     v.voted = typeof body.voted === 'boolean' ? body.voted : !v.voted;
     v.ts = v.voted ? Date.now() : null;
-    v.by = v.voted ? (user.name) : null;
+    v.by = v.voted ? user.name : null;
     saveState(); broadcastChange();
     return send(res, 200, v);
   }
 
-  mm = p.match(/^\/api\/precincts\/([^/]+)\/reset$/);
+  mm = p.match(/^\/api\/nodes\/([^/]+)\/reset$/);
   if (mm && m === 'POST') {
-    const pr = findPrecinct(mm[1]);
-    if (!pr) return send(res, 404, { error: 'precinct not found' });
-    if (!canEditPrecinct(user, pr)) return send(res, 403, { error: 'forbidden' });
-    pr.voters.forEach(v => { v.voted = false; v.ts = null; v.by = null; });
+    const node = findNode(mm[1]);
+    if (!node) return send(res, 404, { error: 'node not found' });
+    if (!canEdit(user, node)) return send(res, 403, { error: 'forbidden' });
+    const targets = node.type === 'precinct'
+      ? [node]
+      : descendantsOf(node.id).filter(n => n.type === 'precinct');
+    let count = 0;
+    for (const t of targets) {
+      (t.voters || []).forEach(v => { v.voted = false; v.ts = null; v.by = null; });
+      count++;
+    }
     saveState(); broadcastChange();
-    return send(res, 200, { ok: true });
+    return send(res, 200, { ok: true, precincts: count });
   }
 
   if (m === 'POST' && p === '/api/reset-all') {
     if (!user.isAdmin) return send(res, 403, { error: 'forbidden' });
-    state.precincts = [];
+    state.nodes = [];
     saveState(); broadcastChange();
     return send(res, 200, { ok: true });
   }
 
-  // ---------- Backup / Restore (admin only) ----------
+  // ---------- Backup / Restore ----------
   if (m === 'GET' && p === '/api/export/users') {
     if (!user.isAdmin) return send(res, 403, { error: 'forbidden' });
     return send(res, 200, {
-      kind: 'voting-tracker-users',
-      version: 1,
+      kind: 'voting-tracker-users', version: 1,
       exportedAt: Date.now(),
       users: state.users.map(u => ({
         id: u.id, name: u.name, token: u.token,
@@ -457,7 +555,6 @@ async function handleApi(req, res, parsed) {
     const body = await readBody(req);
     const incoming = Array.isArray(body.users) ? body.users : [];
     const mode = body.mode === 'replace' ? 'replace' : 'merge';
-
     const norm = incoming.map(u => ({
       id: String(u.id || uid()),
       name: String(u.name || '').trim(),
@@ -465,15 +562,12 @@ async function handleApi(req, res, parsed) {
       isAdmin: !!u.isAdmin,
       createdAt: Number(u.createdAt) || Date.now()
     })).filter(u => u.name);
-
     let added = 0, kept = 0, replacedCount = 0;
     if (mode === 'replace') {
-      // Always preserve the importing admin to prevent lockout
       const byId = new Map();
       for (const u of norm) byId.set(u.id, u);
       if (!byId.has(user.id)) byId.set(user.id, { ...user });
       else byId.set(user.id, { ...byId.get(user.id), token: user.token, isAdmin: true });
-      // Dedup by lowercase name (later wins, but never the importing admin)
       const seenNames = new Set();
       const result = [];
       for (const u of byId.values()) {
@@ -503,17 +597,20 @@ async function handleApi(req, res, parsed) {
   if (m === 'GET' && p === '/api/export/state') {
     if (!user.isAdmin) return send(res, 403, { error: 'forbidden' });
     return send(res, 200, {
-      kind: 'voting-tracker-state',
-      version: 1,
+      kind: 'voting-tracker-state', version: 2,
       exportedAt: Date.now(),
-      precincts: state.precincts.map(pr => ({
-        id: pr.id, name: pr.name,
-        ownerId: pr.ownerId,
-        ownerName: state.users.find(u => u.id === pr.ownerId)?.name || null,
-        voters: pr.voters.map(v => ({
-          id: v.id, name: v.name,
-          voted: !!v.voted, ts: v.ts || null, by: v.by || null
-        }))
+      nodes: state.nodes.map(n => ({
+        id: n.id, name: n.name, type: n.type,
+        parentId: n.parentId || null,
+        ownerId: n.ownerId,
+        ownerName: findUser(n.ownerId)?.name || null,
+        path: pathFor(n).map(p => p.name),
+        voters: n.type === 'precinct'
+          ? (n.voters || []).map(v => ({
+              id: v.id, name: v.name,
+              voted: !!v.voted, ts: v.ts || null, by: v.by || null
+            }))
+          : undefined
       }))
     });
   }
@@ -521,50 +618,84 @@ async function handleApi(req, res, parsed) {
   if (m === 'POST' && p === '/api/import/state') {
     if (!user.isAdmin) return send(res, 403, { error: 'forbidden' });
     const body = await readBody(req);
-    const incoming = Array.isArray(body.precincts) ? body.precincts : [];
+    let incoming = Array.isArray(body.nodes) ? body.nodes : null;
+    if (!incoming && Array.isArray(body.precincts)) {
+      // legacy v1: precincts list
+      incoming = body.precincts.map(p => ({
+        id: p.id, name: p.name, type: 'precinct',
+        parentId: null, ownerId: p.ownerId, ownerName: p.ownerName,
+        voters: p.voters
+      }));
+    }
+    if (!incoming) return send(res, 400, { error: 'нет данных для импорта' });
     const mode = body.mode === 'replace' ? 'replace' : 'merge';
 
     const userIds = new Set(state.users.map(u => u.id));
     const usersByName = new Map(state.users.map(u => [u.name.toLowerCase(), u]));
 
     let ownerReassigned = 0;
-    const norm = incoming.map(pr => {
-      let ownerId = String(pr.ownerId || '');
+    const oldToNewId = new Map();
+    const norm = incoming.map(raw => {
+      let ownerId = String(raw.ownerId || '');
       if (!userIds.has(ownerId)) {
-        const byName = pr.ownerName && usersByName.get(String(pr.ownerName).toLowerCase());
+        const byName = raw.ownerName && usersByName.get(String(raw.ownerName).toLowerCase());
         if (byName) ownerId = byName.id;
         else { ownerId = user.id; ownerReassigned++; }
       }
+      const newId = String(raw.id || uid());
+      if (raw.id) oldToNewId.set(raw.id, newId);
+      const type = TYPES.includes(raw.type) ? raw.type : 'precinct';
       return {
-        id: String(pr.id || uid()),
-        name: String(pr.name || '').trim() || 'Без названия',
+        id: newId,
+        name: String(raw.name || '').trim() || 'Без названия',
+        type,
+        _origParent: raw.parentId || null,
         ownerId,
-        voters: (Array.isArray(pr.voters) ? pr.voters : []).map(v => ({
-          id: String(v.id || uid()),
-          name: String(v.name || '').trim(),
-          voted: !!v.voted,
-          ts: v.voted && v.ts ? Number(v.ts) : null,
-          by:  v.voted && v.by ? String(v.by) : null
-        })).filter(v => v.name)
+        voters: type === 'precinct'
+          ? (Array.isArray(raw.voters) ? raw.voters : []).map(v => ({
+              id: String(v.id || uid()),
+              name: String(v.name || '').trim(),
+              voted: !!v.voted,
+              ts: v.voted && v.ts ? Number(v.ts) : null,
+              by:  v.voted && v.by ? String(v.by) : null
+            })).filter(v => v.name)
+          : undefined
       };
-    }).filter(pr => pr.name);
+    }).filter(n => n.name);
 
-    let added = 0, replacedCount = 0;
     if (mode === 'replace') {
-      state.precincts = norm;
-      replacedCount = norm.length;
+      // rewire parentId via oldToNewId where possible
+      for (const n of norm) {
+        n.parentId = n._origParent ? (oldToNewId.get(n._origParent) || null) : null;
+        delete n._origParent;
+      }
+      state.nodes = norm;
     } else {
-      const existingIds = new Set(state.precincts.map(p => p.id));
-      for (const pr of norm) {
-        if (existingIds.has(pr.id)) pr.id = uid();
-        state.precincts.push(pr);
-        added++;
+      const existingIds = new Set(state.nodes.map(n => n.id));
+      for (const n of norm) {
+        if (existingIds.has(n.id)) {
+          const fresh = uid();
+          oldToNewId.set(n.id, fresh);
+          n.id = fresh;
+        }
+      }
+      for (const n of norm) {
+        if (n._origParent) {
+          const mapped = oldToNewId.get(n._origParent);
+          n.parentId = mapped || (findNode(n._origParent) ? n._origParent : null);
+        } else {
+          n.parentId = null;
+        }
+        delete n._origParent;
+        state.nodes.push(n);
       }
     }
     saveState(); broadcastChange();
     return send(res, 200, {
-      ok: true, mode, added, replaced: replacedCount,
-      total: state.precincts.length, ownerReassigned
+      ok: true, mode,
+      total: state.nodes.length,
+      imported: norm.length,
+      ownerReassigned
     });
   }
 
@@ -579,16 +710,13 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
 
   const parsed = url.parse(req.url, true);
-
   if (parsed.pathname.startsWith('/api/')) {
     try { await handleApi(req, res, parsed); }
     catch (e) { console.error('API error:', e.message); send(res, 500, { error: e.message }); }
     return;
   }
-
   const entry = STATIC[parsed.pathname];
   if (entry) return serveStatic(res, entry);
-
   send(res, 404, 'Not found');
 });
 

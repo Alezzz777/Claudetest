@@ -154,6 +154,8 @@
 
     const precincts = summary.precincts.slice()
       .sort((a, b) => b.pct - a.pct || a.name.localeCompare(b.name, 'ru'));
+    const factories = (summary.factories || []).slice()
+      .sort((a, b) => b.pct - a.pct || a.name.localeCompare(b.name, 'ru'));
 
     m.innerHTML = `
       <div class="total-card">
@@ -169,14 +171,36 @@
         </div>
       </div>
 
+      ${factories.length ? `
+      <div class="section-title">По заводам (${factories.length})</div>
+      ${factories.map(f => `
+        <div class="precinct">
+          <div class="precinct-head">
+            <div class="precinct-name">🏭 ${escapeHtml(f.name)}</div>
+            <div class="precinct-pct">${f.total ? f.pct.toFixed(1)+'%' : '—'}</div>
+          </div>
+          ${f.total ? `<div class="precinct-bar">
+            <div class="precinct-fill ${fillClass(f.pct)}" style="width:${f.pct}%"></div>
+          </div>` : ''}
+          <div class="precinct-stats">
+            <span>Всего: <b>${f.total}</b></span>
+            <span class="voted">Голосовали: <b>${f.voted}</b></span>
+            <span class="left">Осталось: <b>${f.left}</b></span>
+          </div>
+        </div>
+      `).join('')}` : ''}
+
       <div class="section-title">По участкам (${precincts.length})</div>
 
-      ${precincts.map(p => `
+      ${precincts.map(p => {
+        const trail = (p.path || []).slice(0, -1).map(x => x.name).join(' / ');
+        return `
         <div class="precinct">
           <div class="precinct-head">
             <div class="precinct-name">${escapeHtml(p.name)}</div>
             <div class="precinct-pct">${p.pct.toFixed(1)}%</div>
           </div>
+          ${trail ? `<div style="font-size:12px; color:#78909c; margin:-4px 0 6px;">${escapeHtml(trail)}</div>` : ''}
           <div class="precinct-bar">
             <div class="precinct-fill ${fillClass(p.pct)}" style="width:${p.pct}%"></div>
           </div>
@@ -185,35 +209,40 @@
             <span class="voted">Голосовали: <b>${p.voted}</b></span>
             <span class="left">Осталось: <b>${p.left}</b></span>
           </div>
-        </div>
-      `).join('')}
+        </div>`;
+      }).join('')}
 
       <div class="section-title">Таблица</div>
       <table>
         <thead>
           <tr>
+            <th>Завод</th>
+            <th class="hide-mobile">Цех</th>
             <th>Участок</th>
             <th class="num">Всего</th>
-            <th class="num">Голосовали</th>
-            <th class="num">Осталось</th>
+            <th class="num">Голос.</th>
             <th class="num">Явка</th>
           </tr>
         </thead>
         <tbody>
-          ${precincts.map(p => `
+          ${precincts.map(p => {
+            const path = p.path || [];
+            const fac = path.find(x => x.type === 'factory')?.name || '';
+            const wsh = path.find(x => x.type === 'workshop')?.name || '';
+            return `
             <tr>
+              <td>${escapeHtml(fac)}</td>
+              <td class="hide-mobile">${escapeHtml(wsh)}</td>
               <td>${escapeHtml(p.name)}</td>
               <td class="num">${p.total}</td>
               <td class="num" style="color:#43a047">${p.voted}</td>
-              <td class="num" style="color:#e53935">${p.left}</td>
               <td class="num"><b>${p.pct.toFixed(1)}%</b></td>
             </tr>
-          `).join('')}
+          `;}).join('')}
           <tr>
-            <td><b>Итого</b></td>
+            <td colspan="3"><b>Итого</b></td>
             <td class="num"><b>${summary.total}</b></td>
             <td class="num"><b>${summary.voted}</b></td>
-            <td class="num"><b>${summary.left}</b></td>
             <td class="num"><b>${summary.pct.toFixed(1)}%</b></td>
           </tr>
         </tbody>
