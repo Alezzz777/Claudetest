@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#1e88e5">
+<title>Контроль голосования</title>
+<link rel="manifest" href="manifest.json">
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #f4f6f8;
+    color: #1f2933;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior: none;
+  }
+  body { min-height: 100vh; display: flex; flex-direction: column; }
+
+  header {
+    position: sticky; top: 0; z-index: 10;
+    background: #1e88e5; color: #fff;
+    padding: 14px 16px;
+    display: flex; align-items: center; justify-content: space-between;
+    box-shadow: 0 2px 6px rgba(0,0,0,.15);
+  }
+  header h1 { margin: 0; font-size: 17px; font-weight: 600; }
+  header .actions { display: flex; gap: 8px; }
+  header button {
+    background: rgba(255,255,255,.18);
+    color: #fff;
+    border: none;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  header button:active { background: rgba(255,255,255,.32); }
+
+  main { flex: 1; padding: 12px 14px 100px; }
+
+  .card {
+    background: #fff;
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  }
+
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .stat {
+    background: #fff;
+    border-radius: 10px;
+    padding: 10px 8px;
+    text-align: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  }
+  .stat .val { font-size: 22px; font-weight: 700; color: #1e88e5; }
+  .stat .lbl { font-size: 11px; color: #607080; margin-top: 2px; text-transform: uppercase; letter-spacing: .3px; }
+
+  .progress-wrap {
+    background: #fff;
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  }
+  .progress-head { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px; }
+  .progress-head b { color: #1e88e5; font-size: 16px; }
+  .progress-bar {
+    height: 10px;
+    background: #e3eaf0;
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #43a047, #66bb6a);
+    width: 0%;
+    transition: width .25s ease;
+  }
+
+  .search-box {
+    position: relative;
+    margin-bottom: 10px;
+  }
+  .search-box input {
+    width: 100%;
+    padding: 12px 14px;
+    border: 1px solid #d0d8e0;
+    border-radius: 10px;
+    font-size: 16px;
+    background: #fff;
+    outline: none;
+  }
+  .search-box input:focus { border-color: #1e88e5; }
+
+  .filter-tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+  .filter-tabs button {
+    flex: 1;
+    background: #fff;
+    border: 1px solid #d0d8e0;
+    padding: 9px 6px;
+    border-radius: 8px;
+    font-size: 13px;
+    color: #455a64;
+    cursor: pointer;
+  }
+  .filter-tabs button.active {
+    background: #1e88e5;
+    color: #fff;
+    border-color: #1e88e5;
+  }
+
+  .voter-list { list-style: none; padding: 0; margin: 0; }
+  .voter {
+    background: #fff;
+    margin-bottom: 6px;
+    border-radius: 10px;
+    padding: 14px 14px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    box-shadow: 0 1px 2px rgba(0,0,0,.05);
+    cursor: pointer;
+    user-select: none;
+    transition: background .15s;
+  }
+  .voter:active { background: #eef4fb; }
+  .voter.voted { background: #e8f5e9; }
+  .voter.voted .name { text-decoration: line-through; color: #6b7c80; }
+  .voter .check {
+    width: 26px; height: 26px;
+    border-radius: 50%;
+    border: 2px solid #b0bec5;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    background: #fff;
+    font-size: 16px;
+    color: transparent;
+  }
+  .voter.voted .check {
+    background: #43a047; border-color: #43a047; color: #fff;
+  }
+  .voter .name { flex: 1; font-size: 15px; line-height: 1.3; }
+  .voter .time { font-size: 11px; color: #78909c; }
+
+  .empty {
+    text-align: center;
+    padding: 40px 20px;
+    color: #78909c;
+    font-size: 14px;
+  }
+
+  .precinct-select {
+    display: flex; gap: 8px; align-items: center;
+    margin-bottom: 12px;
+  }
+  .precinct-select select {
+    flex: 1;
+    padding: 11px 12px;
+    border: 1px solid #d0d8e0;
+    border-radius: 10px;
+    background: #fff;
+    font-size: 15px;
+    outline: none;
+  }
+
+  .fab {
+    position: fixed;
+    right: 18px; bottom: 18px;
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    background: #1e88e5;
+    color: #fff;
+    border: none;
+    font-size: 28px;
+    box-shadow: 0 4px 12px rgba(30,136,229,.4);
+    cursor: pointer;
+    z-index: 5;
+  }
+  .fab:active { transform: scale(.95); }
+
+  /* Modal */
+  .modal-bg {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.5);
+    display: none;
+    align-items: flex-end;
+    justify-content: center;
+    z-index: 100;
+  }
+  .modal-bg.show { display: flex; }
+  .modal {
+    background: #fff;
+    width: 100%;
+    max-width: 600px;
+    border-radius: 16px 16px 0 0;
+    padding: 18px;
+    max-height: 88vh;
+    overflow-y: auto;
+    animation: slideUp .2s ease;
+  }
+  @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  .modal h2 { margin: 0 0 14px; font-size: 18px; }
+  .modal label { display: block; font-size: 13px; color: #546e7a; margin: 10px 0 5px; }
+  .modal input, .modal textarea, .modal select {
+    width: 100%;
+    padding: 11px 12px;
+    border: 1px solid #d0d8e0;
+    border-radius: 10px;
+    font-size: 15px;
+    font-family: inherit;
+    outline: none;
+    background: #fff;
+  }
+  .modal textarea { min-height: 180px; resize: vertical; }
+  .modal .row { display: flex; gap: 8px; }
+  .modal-actions {
+    display: flex; gap: 8px; margin-top: 16px;
+  }
+  .btn {
+    flex: 1;
+    padding: 13px;
+    border-radius: 10px;
+    border: none;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .btn-primary { background: #1e88e5; color: #fff; }
+  .btn-secondary { background: #eceff1; color: #37474f; }
+  .btn-danger { background: #e53935; color: #fff; }
+  .btn:active { opacity: .85; }
+
+  .precinct-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px; background: #f4f6f8; border-radius: 8px; margin-bottom: 6px;
+  }
+  .precinct-row .pname { flex: 1; font-weight: 600; }
+  .precinct-row .pcount { font-size: 12px; color: #607080; }
+  .icon-btn {
+    background: none; border: none; padding: 6px;
+    color: #546e7a; cursor: pointer; font-size: 16px;
+  }
+  .icon-btn.danger { color: #e53935; }
+
+  .hint { font-size: 12px; color: #78909c; margin-top: 4px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1 id="title">Контроль голосования</h1>
+  <div class="actions">
+    <button id="btnSetup">⚙</button>
+    <button id="btnMenu">⋮</button>
+  </div>
+</header>
+
+<main id="main"></main>
+
+<!-- Setup modal -->
+<div class="modal-bg" id="setupModal">
+  <div class="modal">
+    <h2>Участки голосования</h2>
+    <div id="precinctList"></div>
+
+    <label>Название нового участка</label>
+    <div class="row">
+      <input type="text" id="newPrecinctName" placeholder="Например: Участок №1">
+      <button class="btn btn-primary" style="flex:0 0 auto; padding: 11px 16px;" id="addPrecinct">+</button>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="closeSetup">Готово</button>
+    </div>
+  </div>
+</div>
+
+<!-- Precinct editor modal -->
+<div class="modal-bg" id="editModal">
+  <div class="modal">
+    <h2 id="editTitle">Редактирование участка</h2>
+
+    <label>Название участка</label>
+    <input type="text" id="editName">
+
+    <label>Список сотрудников (по одному ФИО на строку)</label>
+    <textarea id="editVoters" placeholder="Иванов Иван Иванович&#10;Петров Пётр Петрович&#10;Сидорова Анна Сергеевна"></textarea>
+    <div class="hint">Можно вставить список из Excel или текстового файла.</div>
+
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="cancelEdit">Отмена</button>
+      <button class="btn btn-primary" id="saveEdit">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<!-- Menu modal -->
+<div class="modal-bg" id="menuModal">
+  <div class="modal">
+    <h2>Действия</h2>
+    <div style="display:flex; flex-direction:column; gap:8px;">
+      <button class="btn btn-secondary" id="actExport">Экспорт результатов (CSV)</button>
+      <button class="btn btn-secondary" id="actResetVotes">Сбросить отметки текущего участка</button>
+      <button class="btn btn-danger" id="actResetAll">Удалить все данные</button>
+      <button class="btn btn-secondary" id="closeMenu">Закрыть</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const STORAGE_KEY = 'voting_tracker_v1';
+
+  const state = {
+    precincts: [],     // [{id, name, voters: [{id, name, voted, ts}]}]
+    currentId: null,
+    filter: 'all',     // all | left | voted
+    search: ''
+  };
+
+  const $ = (id) => document.getElementById(id);
+
+  function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+
+  function load() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const data = JSON.parse(raw);
+        state.precincts = data.precincts || [];
+        state.currentId = data.currentId || (state.precincts[0]?.id ?? null);
+      }
+    } catch (e) { console.warn(e); }
+  }
+  function save() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      precincts: state.precincts,
+      currentId: state.currentId
+    }));
+  }
+
+  function currentPrecinct() {
+    return state.precincts.find(p => p.id === state.currentId) || null;
+  }
+
+  function render() {
+    const main = $('main');
+    if (state.precincts.length === 0) {
+      main.innerHTML = `
+        <div class="empty">
+          <p style="font-size:48px; margin:0;">🗳️</p>
+          <h3>Добро пожаловать!</h3>
+          <p>Для начала работы создайте участок голосования и добавьте список сотрудников.</p>
+          <button class="btn btn-primary" style="max-width:240px; margin: 12px auto;" onclick="document.getElementById('btnSetup').click()">Настроить участки</button>
+        </div>`;
+      return;
+    }
+
+    const p = currentPrecinct();
+    if (!p) {
+      state.currentId = state.precincts[0].id;
+      return render();
+    }
+
+    const total = p.voters.length;
+    const voted = p.voters.filter(v => v.voted).length;
+    const left = total - voted;
+    const pct = total ? (voted / total * 100) : 0;
+
+    const filtered = p.voters
+      .filter(v => state.filter === 'all' ||
+                   (state.filter === 'voted' && v.voted) ||
+                   (state.filter === 'left' && !v.voted))
+      .filter(v => !state.search || v.name.toLowerCase().includes(state.search.toLowerCase()));
+
+    // Sort: unvoted first (by name), then voted
+    filtered.sort((a, b) => {
+      if (a.voted !== b.voted) return a.voted ? 1 : -1;
+      return a.name.localeCompare(b.name, 'ru');
+    });
+
+    main.innerHTML = `
+      <div class="precinct-select">
+        <select id="precinctSel">
+          ${state.precincts.map(pp => `<option value="${pp.id}" ${pp.id===p.id?'selected':''}>${escapeHtml(pp.name)}</option>`).join('')}
+        </select>
+      </div>
+
+      <div class="stats">
+        <div class="stat"><div class="val">${total}</div><div class="lbl">Всего</div></div>
+        <div class="stat"><div class="val" style="color:#43a047">${voted}</div><div class="lbl">Голосовали</div></div>
+        <div class="stat"><div class="val" style="color:#e53935">${left}</div><div class="lbl">Осталось</div></div>
+      </div>
+
+      <div class="progress-wrap">
+        <div class="progress-head">
+          <span>Явка</span>
+          <b>${pct.toFixed(1)}%</b>
+        </div>
+        <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+      </div>
+
+      <div class="search-box">
+        <input type="search" id="searchInput" placeholder="🔍 Поиск по ФИО..." value="${escapeHtml(state.search)}">
+      </div>
+
+      <div class="filter-tabs">
+        <button data-f="all"   class="${state.filter==='all'?'active':''}">Все (${total})</button>
+        <button data-f="left"  class="${state.filter==='left'?'active':''}">Осталось (${left})</button>
+        <button data-f="voted" class="${state.filter==='voted'?'active':''}">Голосовали (${voted})</button>
+      </div>
+
+      ${total === 0 ? `
+        <div class="empty">
+          <p>В этом участке нет сотрудников.</p>
+          <button class="btn btn-primary" style="max-width:240px; margin: 8px auto;" onclick="openEdit('${p.id}')">Добавить список</button>
+        </div>
+      ` : filtered.length === 0 ? `
+        <div class="empty"><p>Ничего не найдено.</p></div>
+      ` : `
+        <ul class="voter-list">
+          ${filtered.map(v => `
+            <li class="voter ${v.voted ? 'voted' : ''}" data-id="${v.id}">
+              <div class="check">${v.voted ? '✓' : ''}</div>
+              <div class="name">${escapeHtml(v.name)}</div>
+              ${v.voted && v.ts ? `<div class="time">${formatTime(v.ts)}</div>` : ''}
+            </li>
+          `).join('')}
+        </ul>
+      `}
+    `;
+
+    // bind interactions
+    $('precinctSel').addEventListener('change', e => {
+      state.currentId = e.target.value;
+      save(); render();
+    });
+    $('searchInput').addEventListener('input', e => {
+      state.search = e.target.value;
+      renderListOnly();
+    });
+    main.querySelectorAll('.filter-tabs button').forEach(b => {
+      b.addEventListener('click', () => { state.filter = b.dataset.f; render(); });
+    });
+    main.querySelectorAll('.voter').forEach(el => {
+      el.addEventListener('click', () => toggleVote(el.dataset.id));
+    });
+  }
+
+  function renderListOnly() {
+    // Re-render just the list-area; simpler: full re-render preserving focus
+    const active = document.activeElement;
+    const selStart = active && active.id === 'searchInput' ? active.selectionStart : null;
+    render();
+    if (selStart !== null) {
+      const s = $('searchInput');
+      if (s) { s.focus(); try { s.setSelectionRange(selStart, selStart); } catch(e){} }
+    }
+  }
+
+  function toggleVote(voterId) {
+    const p = currentPrecinct();
+    if (!p) return;
+    const v = p.voters.find(x => x.id === voterId);
+    if (!v) return;
+    v.voted = !v.voted;
+    v.ts = v.voted ? Date.now() : null;
+    save();
+    render();
+    if (navigator.vibrate) navigator.vibrate(v.voted ? 30 : 15);
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+  function formatTime(ts) {
+    const d = new Date(ts);
+    return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  // ---------- SETUP MODAL ----------
+  function renderPrecinctList() {
+    const html = state.precincts.length === 0
+      ? '<p style="color:#78909c; font-size:14px;">Участков пока нет. Добавьте первый.</p>'
+      : state.precincts.map(p => `
+        <div class="precinct-row">
+          <div>
+            <div class="pname">${escapeHtml(p.name)}</div>
+            <div class="pcount">${p.voters.length} чел.</div>
+          </div>
+          <div style="flex:1"></div>
+          <button class="icon-btn" onclick="openEdit('${p.id}')" title="Редактировать">✏️</button>
+          <button class="icon-btn danger" onclick="deletePrecinct('${p.id}')" title="Удалить">🗑️</button>
+        </div>
+      `).join('');
+    $('precinctList').innerHTML = html;
+  }
+
+  function openSetup() {
+    renderPrecinctList();
+    $('setupModal').classList.add('show');
+  }
+  function closeSetup() {
+    $('setupModal').classList.remove('show');
+    render();
+  }
+
+  function addPrecinct() {
+    const name = $('newPrecinctName').value.trim();
+    if (!name) return;
+    const p = { id: uid(), name, voters: [] };
+    state.precincts.push(p);
+    if (!state.currentId) state.currentId = p.id;
+    save();
+    $('newPrecinctName').value = '';
+    renderPrecinctList();
+    openEdit(p.id);
+  }
+
+  window.deletePrecinct = function(id) {
+    const p = state.precincts.find(x => x.id === id);
+    if (!p) return;
+    if (!confirm(`Удалить участок "${p.name}" и все его данные?`)) return;
+    state.precincts = state.precincts.filter(x => x.id !== id);
+    if (state.currentId === id) state.currentId = state.precincts[0]?.id || null;
+    save();
+    renderPrecinctList();
+  };
+
+  // ---------- EDIT MODAL ----------
+  let editingId = null;
+  window.openEdit = function(id) {
+    const p = state.precincts.find(x => x.id === id);
+    if (!p) return;
+    editingId = id;
+    $('editTitle').textContent = 'Редактирование участка';
+    $('editName').value = p.name;
+    $('editVoters').value = p.voters.map(v => v.name).join('\n');
+    $('setupModal').classList.remove('show');
+    $('editModal').classList.add('show');
+  };
+  function closeEdit() {
+    $('editModal').classList.remove('show');
+    editingId = null;
+    openSetup();
+  }
+  function saveEdit() {
+    const p = state.precincts.find(x => x.id === editingId);
+    if (!p) return;
+    const newName = $('editName').value.trim();
+    if (!newName) { alert('Введите название участка'); return; }
+    p.name = newName;
+
+    const lines = $('editVoters').value
+      .split('\n').map(s => s.trim()).filter(Boolean);
+
+    // preserve existing voted state by name
+    const existing = new Map(p.voters.map(v => [v.name, v]));
+    p.voters = lines.map(name => {
+      const prev = existing.get(name);
+      return prev || { id: uid(), name, voted: false, ts: null };
+    });
+
+    save();
+    closeEdit();
+  }
+
+  // ---------- MENU MODAL ----------
+  function openMenu() { $('menuModal').classList.add('show'); }
+  function closeMenu() { $('menuModal').classList.remove('show'); }
+
+  function exportCSV() {
+    const rows = [['Участок', 'ФИО', 'Проголосовал', 'Время']];
+    state.precincts.forEach(p => {
+      p.voters.forEach(v => {
+        rows.push([
+          p.name,
+          v.name,
+          v.voted ? 'Да' : 'Нет',
+          v.ts ? new Date(v.ts).toLocaleString('ru-RU') : ''
+        ]);
+      });
+    });
+    const csv = '﻿' + rows.map(r =>
+      r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(';')
+    ).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `voting_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    closeMenu();
+  }
+  function resetVotes() {
+    const p = currentPrecinct();
+    if (!p) return;
+    if (!confirm(`Сбросить все отметки на участке "${p.name}"?`)) return;
+    p.voters.forEach(v => { v.voted = false; v.ts = null; });
+    save(); render(); closeMenu();
+  }
+  function resetAll() {
+    if (!confirm('Удалить ВСЕ данные приложения? Это действие необратимо.')) return;
+    if (!confirm('Точно удалить всё?')) return;
+    state.precincts = []; state.currentId = null;
+    save(); render(); closeMenu();
+  }
+
+  // ---------- INIT ----------
+  load();
+  render();
+
+  $('btnSetup').addEventListener('click', openSetup);
+  $('btnMenu').addEventListener('click', openMenu);
+  $('closeSetup').addEventListener('click', closeSetup);
+  $('addPrecinct').addEventListener('click', addPrecinct);
+  $('newPrecinctName').addEventListener('keydown', e => { if (e.key === 'Enter') addPrecinct(); });
+
+  $('cancelEdit').addEventListener('click', closeEdit);
+  $('saveEdit').addEventListener('click', saveEdit);
+
+  $('closeMenu').addEventListener('click', closeMenu);
+  $('actExport').addEventListener('click', exportCSV);
+  $('actResetVotes').addEventListener('click', resetVotes);
+  $('actResetAll').addEventListener('click', resetAll);
+
+  // close modal on background click
+  ['setupModal','editModal','menuModal'].forEach(id => {
+    $(id).addEventListener('click', e => { if (e.target.id === id) $(id).classList.remove('show'); });
+  });
+})();
+</script>
+</body>
+</html>
