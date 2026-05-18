@@ -12,8 +12,10 @@ const crypto = require('crypto');
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 const PUBLIC_URL = process.env.PUBLIC_URL || '';
-const DATA_FILE = path.join(__dirname, 'data.json');
-const TMP_FILE  = DATA_FILE + '.tmp';
+const DATA_FILE = path.join(__dirname, 'data', 'data.json');
+const TMP_FILE = path.join(__dirname, 'data', 'data.json.tmp');
+//const DATA_FILE = path.join(__dirname, 'data.json');
+//const TMP_FILE  = DATA_FILE + '.tmp';
 const ADMIN_LINK_FILE = path.join(__dirname, 'admin-link.txt');
 
 const TYPES = ['factory', 'workshop', 'precinct'];

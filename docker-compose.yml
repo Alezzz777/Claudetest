@@ -1,0 +1,15 @@
+services:
+  mobile-voting:
+    build: .
+    container_name: mobile-voting
+    restart: unless-stopped
+    expose:
+      - "3000"
+    networks:
+      - build_default
+    volumes:
+      - ../data:/app/data
+
+networks:
+  build_default:
+    external: true
