@@ -117,6 +117,26 @@
     line-height: 1.5;
   }
   .csv-hint code { background: #fff; padding: 1px 5px; border-radius: 3px; font-size: 11px; }
+
+  .backup-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+  }
+  @media (max-width: 540px) { .backup-grid { grid-template-columns: 1fr; } }
+  .backup-card {
+    border: 1px solid #eef2f5; border-radius: 10px; padding: 12px;
+  }
+  .backup-card h3 { margin: 0 0 4px; font-size: 14px; }
+  .backup-card p { margin: 0 0 10px; font-size: 12px; color: #78909c; }
+  .backup-card .row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .backup-card .row .btn { flex: 1 1 0; min-width: 110px; padding: 10px; font-size: 13px; font-weight: 600; }
+  .mode-list { display:flex; flex-direction:column; gap:8px; margin:8px 0 4px; }
+  .mode-list label {
+    display:flex; gap:8px; align-items:flex-start;
+    padding:10px 12px; border:1px solid #d0d8e0; border-radius:10px; cursor:pointer;
+  }
+  .mode-list label.sel { border-color:#1e88e5; background:#e3f2fd; }
+  .mode-list .t { font-weight:600; font-size:14px; }
+  .mode-list .d { font-size:12px; color:#546e7a; margin-top:2px; }
 </style>
 </head>
 <body>
@@ -150,6 +170,38 @@
     <div style="display:flex; gap:8px; margin-top:12px;">
       <button class="btn" style="background:#eceff1; color:#37474f;" id="cancelImport">Отмена</button>
       <button class="btn btn-primary" id="confirmImport">Создать пользователей</button>
+    </div>
+  </div>
+</div>
+
+<!-- Backup import modal -->
+<div class="modal-bg" id="backupModal">
+  <div class="modal">
+    <h2 id="backupTitle"></h2>
+    <div id="backupStats" style="font-size:13px; margin-bottom:6px;"></div>
+    <div id="backupWarn" style="font-size:12px; color:#c62828; background:#ffebee; border-radius:8px; padding:8px 10px; margin:6px 0; display:none;"></div>
+
+    <label style="margin-top:10px;">Режим импорта:</label>
+    <div class="mode-list" id="backupModes">
+      <label class="sel" data-mode="merge">
+        <input type="radio" name="bmode" value="merge" checked>
+        <span>
+          <div class="t">Добавить</div>
+          <div class="d">Существующие записи сохраняются; добавляются новые из файла.</div>
+        </span>
+      </label>
+      <label data-mode="replace">
+        <input type="radio" name="bmode" value="replace">
+        <span>
+          <div class="t">Заменить</div>
+          <div class="d">Все существующие записи удаляются, на их место загружается содержимое файла.</div>
+        </span>
+      </label>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn" style="background:#eceff1; color:#37474f;" id="cancelBackup">Отмена</button>
+      <button class="btn btn-primary" id="confirmBackup">Импортировать</button>
     </div>
   </div>
 </div>
@@ -266,11 +318,162 @@
         <h2>Пользователи (${totalUsers}, админов: ${admins})</h2>
         <div id="userList"></div>
       </div>
+
+      <div class="section">
+        <h2>Резервные копии</h2>
+        <div class="backup-grid">
+          <div class="backup-card">
+            <h3>База пользователей</h3>
+            <p>Список аккаунтов с токенами и ролями. Используйте для переноса
+               пользователей между серверами или восстановления доступа.</p>
+            <div class="row">
+              <button class="btn btn-primary" id="exportUsers">⬇ Экспорт JSON</button>
+              <label class="btn" style="background:#eceff1; color:#37474f; cursor:pointer;">
+                ⬆ Импорт JSON
+                <input type="file" id="importUsersFile" accept=".json,application/json" style="display:none;">
+              </label>
+            </div>
+          </div>
+          <div class="backup-card">
+            <h3>Состояние голосования</h3>
+            <p>Все участки, списки ФИО, отметки и журнал «кто отметил».
+               Снимок данных для бэкапа или переноса.</p>
+            <div class="row">
+              <button class="btn btn-primary" id="exportState">⬇ Экспорт JSON</button>
+              <label class="btn" style="background:#eceff1; color:#37474f; cursor:pointer;">
+                ⬆ Импорт JSON
+                <input type="file" id="importStateFile" accept=".json,application/json" style="display:none;">
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
     `;
     $('addBtn').addEventListener('click', addUser);
     $('newName').addEventListener('keydown', e => { if (e.key === 'Enter') addUser(); });
     $('csvFile').addEventListener('change', onCsvFile);
+
+    $('exportUsers').addEventListener('click', () => exportBackup('users'));
+    $('exportState').addEventListener('click', () => exportBackup('state'));
+    $('importUsersFile').addEventListener('change', e => onBackupFile(e, 'users'));
+    $('importStateFile').addEventListener('change', e => onBackupFile(e, 'state'));
     renderUsers();
+  }
+
+  // ---------- Backup / Restore ----------
+  async function exportBackup(kind) {
+    try {
+      const r = await fetch(`/api/export/${kind}`, { headers: { 'Authorization': 'Bearer ' + token() } });
+      if (!r.ok) { toast('Ошибка экспорта: HTTP ' + r.status); return; }
+      const data = await r.json();
+      const json = JSON.stringify(data, null, 2);
+      const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const date = new Date().toISOString().slice(0,16).replace(':','-');
+      a.download = `voting_${kind}_${date}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast(kind === 'users' ? 'Файл пользователей скачан' : 'Файл состояния скачан');
+    } catch (e) { toast('Ошибка: ' + e.message); }
+  }
+
+  let pendingBackup = null; // { kind: 'users'|'state', data: {...} }
+
+  function onBackupFile(e, kind) {
+    const f = e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      let data;
+      try { data = JSON.parse(String(reader.result || '')); }
+      catch (err) { toast('Файл не является корректным JSON'); return; }
+
+      const list = kind === 'users' ? data.users : data.precincts;
+      if (!Array.isArray(list)) {
+        toast(`Файл не содержит ${kind === 'users' ? 'списка пользователей' : 'списка участков'}`);
+        return;
+      }
+      const expectedKind = 'voting-tracker-' + kind;
+      if (data.kind && data.kind !== expectedKind) {
+        if (!confirm(`Файл помечен как «${data.kind}», ожидался «${expectedKind}». Продолжить?`)) return;
+      }
+      pendingBackup = { kind, data, list };
+      showBackupModal();
+    };
+    reader.readAsText(f, 'utf-8');
+  }
+
+  function showBackupModal() {
+    const { kind, list, data } = pendingBackup;
+    const isUsers = kind === 'users';
+    $('backupTitle').textContent = isUsers
+      ? 'Импорт базы пользователей'
+      : 'Импорт состояния голосования';
+
+    let stats;
+    if (isUsers) {
+      const admins = list.filter(u => u.isAdmin).length;
+      stats = `В файле: <b>${list.length}</b> пользователей, из них админов: <b>${admins}</b>` +
+              (data.exportedAt ? ` · экспорт: ${new Date(data.exportedAt).toLocaleString('ru-RU')}` : '');
+    } else {
+      const voters = list.reduce((s,p) => s + (Array.isArray(p.voters) ? p.voters.length : 0), 0);
+      const voted  = list.reduce((s,p) => s + (Array.isArray(p.voters) ? p.voters.filter(v=>v.voted).length : 0), 0);
+      stats = `В файле: <b>${list.length}</b> участков, <b>${voters}</b> сотрудников, из них с отметкой: <b>${voted}</b>` +
+              (data.exportedAt ? ` · экспорт: ${new Date(data.exportedAt).toLocaleString('ru-RU')}` : '');
+    }
+    $('backupStats').innerHTML = stats;
+
+    $('backupWarn').style.display = 'none';
+    updateBackupWarn('merge');
+
+    $('backupModes').querySelectorAll('label').forEach(l => {
+      l.classList.toggle('sel', l.dataset.mode === 'merge');
+      const input = l.querySelector('input');
+      input.checked = (l.dataset.mode === 'merge');
+    });
+    $('backupModal').classList.add('show');
+  }
+
+  function updateBackupWarn(mode) {
+    const w = $('backupWarn');
+    if (mode !== 'replace') { w.style.display = 'none'; return; }
+    const { kind } = pendingBackup;
+    w.style.display = 'block';
+    w.innerHTML = kind === 'users'
+      ? '⚠ Все существующие пользователи (кроме вас) будут удалены. Их ссылки перестанут работать.'
+      : '⚠ Все существующие участки и отметки будут удалены и заменены содержимым файла.';
+  }
+
+  async function confirmBackupImport() {
+    if (!pendingBackup) return;
+    const { kind, list } = pendingBackup;
+    const mode = document.querySelector('input[name="bmode"]:checked').value;
+
+    if (mode === 'replace' && !confirm('Точно заменить все данные? Действие необратимо.')) return;
+
+    const path = '/api/import/' + kind;
+    const body = kind === 'users' ? { users: list, mode } : { precincts: list, mode };
+    try {
+      const r = await api('POST', path, body);
+      $('backupModal').classList.remove('show');
+      pendingBackup = null;
+      let msg;
+      if (kind === 'users') {
+        msg = mode === 'replace'
+          ? `База пользователей заменена: всего ${r.total}`
+          : `Добавлено пользователей: ${r.added}` + (r.kept ? `, пропущено существующих: ${r.kept}` : '');
+      } else {
+        msg = mode === 'replace'
+          ? `Состояние голосования заменено: участков ${r.total}`
+          : `Добавлено участков: ${r.added}` +
+            (r.ownerReassigned ? `, переназначено владельцев на вас: ${r.ownerReassigned}` : '');
+      }
+      toast(msg);
+      await loadUsers();
+    } catch (e) { toast('Ошибка: ' + e.message); }
   }
 
   // ---------- CSV ----------
@@ -531,7 +734,14 @@
   $('confirmImport').addEventListener('click', confirmImport);
   $('closeResult').addEventListener('click', () => $('resultModal').classList.remove('show'));
   $('downloadLinks').addEventListener('click', downloadLinks);
-  ['importModal','resultModal'].forEach(id => {
+  $('cancelBackup').addEventListener('click', () => { $('backupModal').classList.remove('show'); pendingBackup = null; });
+  $('confirmBackup').addEventListener('click', confirmBackupImport);
+  $('backupModes').addEventListener('change', () => {
+    const mode = document.querySelector('input[name="bmode"]:checked').value;
+    $('backupModes').querySelectorAll('label').forEach(l => l.classList.toggle('sel', l.dataset.mode === mode));
+    updateBackupWarn(mode);
+  });
+  ['importModal','resultModal','backupModal'].forEach(id => {
     $(id).addEventListener('click', e => { if (e.target.id === id) $(id).classList.remove('show'); });
   });
 

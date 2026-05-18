@@ -438,6 +438,136 @@ async function handleApi(req, res, parsed) {
     return send(res, 200, { ok: true });
   }
 
+  // ---------- Backup / Restore (admin only) ----------
+  if (m === 'GET' && p === '/api/export/users') {
+    if (!user.isAdmin) return send(res, 403, { error: 'forbidden' });
+    return send(res, 200, {
+      kind: 'voting-tracker-users',
+      version: 1,
+      exportedAt: Date.now(),
+      users: state.users.map(u => ({
+        id: u.id, name: u.name, token: u.token,
+        isAdmin: !!u.isAdmin, createdAt: u.createdAt
+      }))
+    });
+  }
+
+  if (m === 'POST' && p === '/api/import/users') {
+    if (!user.isAdmin) return send(res, 403, { error: 'forbidden' });
+    const body = await readBody(req);
+    const incoming = Array.isArray(body.users) ? body.users : [];
+    const mode = body.mode === 'replace' ? 'replace' : 'merge';
+
+    const norm = incoming.map(u => ({
+      id: String(u.id || uid()),
+      name: String(u.name || '').trim(),
+      token: u.token ? String(u.token) : token(),
+      isAdmin: !!u.isAdmin,
+      createdAt: Number(u.createdAt) || Date.now()
+    })).filter(u => u.name);
+
+    let added = 0, kept = 0, replacedCount = 0;
+    if (mode === 'replace') {
+      // Always preserve the importing admin to prevent lockout
+      const byId = new Map();
+      for (const u of norm) byId.set(u.id, u);
+      if (!byId.has(user.id)) byId.set(user.id, { ...user });
+      else byId.set(user.id, { ...byId.get(user.id), token: user.token, isAdmin: true });
+      // Dedup by lowercase name (later wins, but never the importing admin)
+      const seenNames = new Set();
+      const result = [];
+      for (const u of byId.values()) {
+        const key = u.name.toLowerCase();
+        if (seenNames.has(key) && u.id !== user.id) continue;
+        seenNames.add(key);
+        result.push(u);
+      }
+      state.users = result;
+      replacedCount = result.length;
+    } else {
+      const ids = new Set(state.users.map(u => u.id));
+      const names = new Set(state.users.map(u => u.name.toLowerCase()));
+      const tokens = new Set(state.users.map(u => u.token));
+      for (const u of norm) {
+        if (ids.has(u.id) || names.has(u.name.toLowerCase())) { kept++; continue; }
+        while (tokens.has(u.token)) u.token = token();
+        tokens.add(u.token);
+        state.users.push(u);
+        added++;
+      }
+    }
+    saveState(); broadcastChange();
+    return send(res, 200, { ok: true, mode, added, kept, replaced: replacedCount, total: state.users.length });
+  }
+
+  if (m === 'GET' && p === '/api/export/state') {
+    if (!user.isAdmin) return send(res, 403, { error: 'forbidden' });
+    return send(res, 200, {
+      kind: 'voting-tracker-state',
+      version: 1,
+      exportedAt: Date.now(),
+      precincts: state.precincts.map(pr => ({
+        id: pr.id, name: pr.name,
+        ownerId: pr.ownerId,
+        ownerName: state.users.find(u => u.id === pr.ownerId)?.name || null,
+        voters: pr.voters.map(v => ({
+          id: v.id, name: v.name,
+          voted: !!v.voted, ts: v.ts || null, by: v.by || null
+        }))
+      }))
+    });
+  }
+
+  if (m === 'POST' && p === '/api/import/state') {
+    if (!user.isAdmin) return send(res, 403, { error: 'forbidden' });
+    const body = await readBody(req);
+    const incoming = Array.isArray(body.precincts) ? body.precincts : [];
+    const mode = body.mode === 'replace' ? 'replace' : 'merge';
+
+    const userIds = new Set(state.users.map(u => u.id));
+    const usersByName = new Map(state.users.map(u => [u.name.toLowerCase(), u]));
+
+    let ownerReassigned = 0;
+    const norm = incoming.map(pr => {
+      let ownerId = String(pr.ownerId || '');
+      if (!userIds.has(ownerId)) {
+        const byName = pr.ownerName && usersByName.get(String(pr.ownerName).toLowerCase());
+        if (byName) ownerId = byName.id;
+        else { ownerId = user.id; ownerReassigned++; }
+      }
+      return {
+        id: String(pr.id || uid()),
+        name: String(pr.name || '').trim() || 'Без названия',
+        ownerId,
+        voters: (Array.isArray(pr.voters) ? pr.voters : []).map(v => ({
+          id: String(v.id || uid()),
+          name: String(v.name || '').trim(),
+          voted: !!v.voted,
+          ts: v.voted && v.ts ? Number(v.ts) : null,
+          by:  v.voted && v.by ? String(v.by) : null
+        })).filter(v => v.name)
+      };
+    }).filter(pr => pr.name);
+
+    let added = 0, replacedCount = 0;
+    if (mode === 'replace') {
+      state.precincts = norm;
+      replacedCount = norm.length;
+    } else {
+      const existingIds = new Set(state.precincts.map(p => p.id));
+      for (const pr of norm) {
+        if (existingIds.has(pr.id)) pr.id = uid();
+        state.precincts.push(pr);
+        added++;
+      }
+    }
+    saveState(); broadcastChange();
+    return send(res, 200, {
+      ok: true, mode, added, replaced: replacedCount,
+      total: state.precincts.length, ownerReassigned
+    });
+  }
+
   return send(res, 404, { error: 'not found' });
 }
 
