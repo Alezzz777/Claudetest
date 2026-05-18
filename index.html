@@ -202,7 +202,17 @@
 
     <label>Список сотрудников (по одному ФИО на строку)</label>
     <textarea id="editVoters" placeholder="Иванов Иван Иванович&#10;Петров Пётр Петрович&#10;Сидорова Анна Сергеевна"></textarea>
-    <div class="hint">Можно вставить список из Excel. Отметки голосования при изменении списка сохраняются по ФИО.</div>
+    <div style="display:flex; align-items:center; gap:10px; margin-top:6px; flex-wrap:wrap;">
+      <label class="btn" style="background:#e3f2fd; color:#1565c0; flex:0 0 auto; padding:8px 12px; font-size:13px; cursor:pointer;">
+        📂 Импорт CSV
+        <input type="file" id="votersCsvFile" accept=".csv,.txt,text/csv,text/plain" style="display:none;">
+      </label>
+      <label style="font-size:12px; color:#546e7a; display:flex; align-items:center; gap:6px;">
+        <input type="checkbox" id="votersCsvAppend"> добавить к существующим
+      </label>
+      <span id="votersCsvStatus" style="font-size:12px; color:#43a047;"></span>
+    </div>
+    <div class="hint">Поддерживаются <code>.csv</code> и <code>.txt</code>. Разделитель <code>,</code>/<code>;</code>/таб определяется автоматически. Если строк несколько колонок — берётся первая (ФИО). Отметки голосования при изменении списка сохраняются по ФИО.</div>
 
     <div class="modal-actions">
       <button class="btn btn-secondary" id="cancelEdit">Отмена</button>
@@ -676,6 +686,68 @@
   $('newPrecinctName').addEventListener('keydown', e => { if (e.key === 'Enter') addPrecinct(); });
   $('cancelEdit').addEventListener('click', closeEdit);
   $('saveEdit').addEventListener('click', saveEdit);
+  $('votersCsvFile').addEventListener('change', onVotersCsv);
+
+  function parseCSV(text) {
+    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+    const sample = text.split('\n').slice(0, 10).join('\n');
+    const counts = {
+      ';': (sample.match(/;/g) || []).length,
+      ',': (sample.match(/,/g) || []).length,
+      '\t':(sample.match(/\t/g)|| []).length
+    };
+    const delim = Object.entries(counts).sort((a,b)=>b[1]-a[1])[0][0] || ',';
+    const rows = [];
+    let i = 0, field = '', row = [], inQuotes = false;
+    while (i < text.length) {
+      const c = text[i];
+      if (inQuotes) {
+        if (c === '"') {
+          if (text[i+1] === '"') { field += '"'; i += 2; continue; }
+          inQuotes = false; i++; continue;
+        }
+        field += c; i++; continue;
+      }
+      if (c === '"' && field === '') { inQuotes = true; i++; continue; }
+      if (c === delim) { row.push(field); field = ''; i++; continue; }
+      if (c === '\n' || c === '\r') {
+        if (field !== '' || row.length) { row.push(field); rows.push(row); row = []; field = ''; }
+        if (c === '\r' && text[i+1] === '\n') i += 2; else i++;
+        continue;
+      }
+      field += c; i++;
+    }
+    if (field !== '' || row.length) { row.push(field); rows.push(row); }
+    return rows.map(r => r.map(c => c.trim())).filter(r => r.some(c => c));
+  }
+
+  function onVotersCsv(e) {
+    const f = e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        let rows = parseCSV(String(reader.result || ''));
+        // Skip likely header
+        if (rows.length > 1) {
+          const first = (rows[0][0] || '').toLowerCase();
+          if (['фио','имя','name','полное имя','сотрудник'].some(h => first.includes(h))) rows = rows.slice(1);
+        }
+        const names = rows.map(r => r[0]).filter(Boolean);
+        if (!names.length) { toast('В файле не найдено ФИО'); return; }
+        const ta = $('editVoters');
+        if ($('votersCsvAppend').checked && ta.value.trim()) {
+          ta.value = ta.value.replace(/\s+$/,'') + '\n' + names.join('\n');
+        } else {
+          ta.value = names.join('\n');
+        }
+        $('votersCsvStatus').textContent = `Загружено: ${names.length}`;
+        setTimeout(() => { $('votersCsvStatus').textContent = ''; }, 3000);
+      } catch (err) { toast('Ошибка чтения CSV: ' + err.message); }
+    };
+    reader.readAsText(f, 'utf-8');
+  }
 
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden && (!es || es.readyState === 2)) { connect(); fetchState(); }

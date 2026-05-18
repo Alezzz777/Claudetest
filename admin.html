@@ -89,6 +89,34 @@
 
   .stat-row { display:flex; gap:14px; font-size:13px; color:#546e7a; flex-wrap:wrap; }
   .stat-row b { color:#1f2933; }
+
+  .modal-bg {
+    position: fixed; inset: 0; background: rgba(0,0,0,.5);
+    display: none; align-items: flex-end; justify-content: center; z-index: 100;
+  }
+  .modal-bg.show { display: flex; }
+  .modal {
+    background: #fff; width: 100%; max-width: 700px;
+    border-radius: 16px 16px 0 0; padding: 18px;
+    max-height: 88vh; overflow-y: auto;
+  }
+  .modal h2 { margin: 0 0 12px; font-size: 18px; }
+
+  .preview {
+    background:#f4f6f8; border-radius:8px; padding:10px;
+    max-height:220px; overflow-y:auto; margin:8px 0;
+    font-size:13px;
+  }
+  .preview .pr-row { padding:3px 0; border-bottom:1px solid #e3eaf0; }
+  .preview .pr-row:last-child { border-bottom: 0; }
+  .preview .pr-row .ad { color:#ff9800; font-size:11px; margin-left:6px; }
+
+  .csv-hint {
+    font-size: 12px; color: #607080; background: #f4f6f8;
+    border-radius: 8px; padding: 10px 12px; margin: 8px 0;
+    line-height: 1.5;
+  }
+  .csv-hint code { background: #fff; padding: 1px 5px; border-radius: 3px; font-size: 11px; }
 </style>
 </head>
 <body>
@@ -106,6 +134,37 @@
 </main>
 
 <div class="toast" id="toast"></div>
+
+<!-- CSV import preview modal -->
+<div class="modal-bg" id="importModal">
+  <div class="modal">
+    <h2>Импорт пользователей из CSV</h2>
+    <div class="csv-hint">
+      Формат: одна строка — один пользователь. Первая колонка — имя,
+      вторая (необязательная) — роль: <code>admin</code>/<code>админ</code>/<code>1</code>
+      для администратора. Разделитель: <code>,</code> <code>;</code> или табуляция.
+      Кавычки поддерживаются.
+    </div>
+    <div id="importStats" style="font-size:13px; margin-bottom:6px;"></div>
+    <div class="preview" id="importPreview"></div>
+    <div style="display:flex; gap:8px; margin-top:12px;">
+      <button class="btn" style="background:#eceff1; color:#37474f;" id="cancelImport">Отмена</button>
+      <button class="btn btn-primary" id="confirmImport">Создать пользователей</button>
+    </div>
+  </div>
+</div>
+
+<!-- Result modal (created users with links) -->
+<div class="modal-bg" id="resultModal">
+  <div class="modal">
+    <h2 id="resultTitle">Пользователи созданы</h2>
+    <div id="resultBody"></div>
+    <div style="display:flex; gap:8px; margin-top:12px;">
+      <button class="btn" style="background:#eceff1; color:#37474f;" id="closeResult">Закрыть</button>
+      <button class="btn btn-primary" id="downloadLinks">Скачать ссылки CSV</button>
+    </div>
+  </div>
+</div>
 
 <script>
 (() => {
@@ -191,6 +250,13 @@
           <label><input type="checkbox" id="newAdmin"> администратор</label>
           <button class="btn btn-primary" id="addBtn">Создать</button>
         </div>
+        <div style="display:flex; align-items:center; gap:10px; margin-top:12px;">
+          <label class="btn" style="background:#e3f2fd; color:#1565c0; flex:0 0 auto; cursor:pointer;">
+            📂 Импорт CSV
+            <input type="file" id="csvFile" accept=".csv,.txt,text/csv,text/plain" style="display:none;">
+          </label>
+          <span style="font-size:12px; color:#78909c;">массовое создание из файла</span>
+        </div>
         <p style="font-size:12px; color:#78909c; margin:8px 0 0;">
           После создания будет показана ссылка для входа — передайте её пользователю.
         </p>
@@ -203,7 +269,144 @@
     `;
     $('addBtn').addEventListener('click', addUser);
     $('newName').addEventListener('keydown', e => { if (e.key === 'Enter') addUser(); });
+    $('csvFile').addEventListener('change', onCsvFile);
     renderUsers();
+  }
+
+  // ---------- CSV ----------
+  function parseCSV(text) {
+    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+    const sample = text.split('\n').slice(0, 10).join('\n');
+    const counts = {
+      ';': (sample.match(/;/g) || []).length,
+      ',': (sample.match(/,/g) || []).length,
+      '\t':(sample.match(/\t/g)|| []).length
+    };
+    const delim = Object.entries(counts).sort((a,b)=>b[1]-a[1])[0][0] || ',';
+    const rows = [];
+    let i = 0, field = '', row = [], inQuotes = false;
+    while (i < text.length) {
+      const c = text[i];
+      if (inQuotes) {
+        if (c === '"') {
+          if (text[i+1] === '"') { field += '"'; i += 2; continue; }
+          inQuotes = false; i++; continue;
+        }
+        field += c; i++; continue;
+      }
+      if (c === '"' && field === '') { inQuotes = true; i++; continue; }
+      if (c === delim) { row.push(field); field = ''; i++; continue; }
+      if (c === '\n' || c === '\r') {
+        if (field !== '' || row.length) { row.push(field); rows.push(row); row = []; field = ''; }
+        if (c === '\r' && text[i+1] === '\n') i += 2; else i++;
+        continue;
+      }
+      field += c; i++;
+    }
+    if (field !== '' || row.length) { row.push(field); rows.push(row); }
+    return rows.map(r => r.map(c => c.trim())).filter(r => r.some(c => c));
+  }
+
+  const ADMIN_FLAGS = new Set(['admin','админ','administrator','администратор','1','true','yes','да','y']);
+
+  function rowsToUsers(rows) {
+    // Skip likely header row
+    if (rows.length > 1) {
+      const first = (rows[0][0] || '').toLowerCase();
+      if (['имя','фио','name','user','пользователь','login'].some(h => first.includes(h))) rows = rows.slice(1);
+    }
+    return rows.map(r => ({
+      name: r[0] || '',
+      isAdmin: ADMIN_FLAGS.has((r[1] || '').toLowerCase())
+    })).filter(u => u.name);
+  }
+
+  let pendingImport = [];
+  function onCsvFile(e) {
+    const f = e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const rows = parseCSV(String(reader.result || ''));
+        pendingImport = rowsToUsers(rows);
+        showImportPreview();
+      } catch (err) { toast('Ошибка чтения CSV: ' + err.message); }
+    };
+    reader.readAsText(f, 'utf-8');
+  }
+
+  function showImportPreview() {
+    const existing = new Set(users.map(u => u.name.toLowerCase()));
+    const dupCount = pendingImport.filter(u => existing.has(u.name.toLowerCase())).length;
+    const newCount = pendingImport.length - dupCount;
+    const adminCount = pendingImport.filter(u => u.isAdmin).length;
+    $('importStats').innerHTML = `Найдено: <b>${pendingImport.length}</b>${
+      dupCount ? ` · уже существуют (будут пропущены): <b>${dupCount}</b>` : ''
+    } · к созданию: <b>${newCount}</b>${adminCount ? ` · из них админов: <b>${adminCount}</b>` : ''}`;
+    $('importPreview').innerHTML = pendingImport.length
+      ? pendingImport.slice(0, 200).map(u => `
+        <div class="pr-row">
+          ${escapeHtml(u.name)}${u.isAdmin ? '<span class="ad">админ</span>' : ''}
+          ${existing.has(u.name.toLowerCase()) ? '<span style="color:#e53935; font-size:11px; margin-left:6px;">уже существует</span>' : ''}
+        </div>`).join('') + (pendingImport.length > 200 ? `<div class="pr-row" style="color:#78909c;">… и ещё ${pendingImport.length - 200}</div>` : '')
+      : '<div style="color:#78909c;">Не найдено ни одной строки с данными</div>';
+    $('confirmImport').disabled = newCount === 0;
+    $('confirmImport').style.opacity = newCount === 0 ? .5 : 1;
+    $('importModal').classList.add('show');
+  }
+
+  async function confirmImport() {
+    try {
+      const res = await api('POST', '/api/users/bulk', { users: pendingImport });
+      $('importModal').classList.remove('show');
+      await loadUsers();
+      showResult(res.created, res.skipped);
+    } catch (e) { toast('Ошибка: ' + e.message); }
+  }
+
+  let lastCreated = [];
+  function showResult(created, skipped) {
+    lastCreated = created || [];
+    $('resultTitle').textContent = `Создано пользователей: ${lastCreated.length}` +
+      (skipped && skipped.length ? ` (пропущено существующих: ${skipped.length})` : '');
+    $('resultBody').innerHTML = lastCreated.length === 0
+      ? '<div class="empty">Никто не создан</div>'
+      : lastCreated.map(u => `
+        <div class="user" data-id="${u.id}">
+          <div class="info">
+            <div class="name">${escapeHtml(u.name)}${u.isAdmin?'<span class="badge">админ</span>':''}</div>
+            <div class="link-box">
+              <code>${escapeHtml(u.link)}</code>
+              <button data-copy="${u.id}">📋</button>
+            </div>
+          </div>
+        </div>
+      `).join('');
+    $('resultBody').querySelectorAll('[data-copy]').forEach(b => {
+      b.addEventListener('click', () => {
+        const u = lastCreated.find(x => x.id === b.dataset.copy);
+        if (u) copy(u.link);
+      });
+    });
+    $('resultModal').classList.add('show');
+  }
+
+  function downloadLinks() {
+    if (!lastCreated.length) return;
+    const rows = [['Имя','Роль','Ссылка']];
+    lastCreated.forEach(u => rows.push([u.name, u.isAdmin ? 'admin' : '', u.link]));
+    const csv = '﻿' + rows.map(r =>
+      r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(';')
+    ).join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `voting_users_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   function renderUsers() {
@@ -322,6 +525,15 @@
     render();
     if (me.isAdmin) { await loadUsers(); connect(); }
   }
+
+  // Bind modals once
+  $('cancelImport').addEventListener('click', () => $('importModal').classList.remove('show'));
+  $('confirmImport').addEventListener('click', confirmImport);
+  $('closeResult').addEventListener('click', () => $('resultModal').classList.remove('show'));
+  $('downloadLinks').addEventListener('click', downloadLinks);
+  ['importModal','resultModal'].forEach(id => {
+    $(id).addEventListener('click', e => { if (e.target.id === id) $(id).classList.remove('show'); });
+  });
 
   init();
 })();

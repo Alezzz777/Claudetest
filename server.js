@@ -245,6 +245,35 @@ async function handleApi(req, res, parsed) {
   }
 
   // ---------- Users (admin only) ----------
+  if (p === '/api/users/bulk' && m === 'POST') {
+    if (!user.isAdmin) return send(res, 403, { error: 'forbidden' });
+    const body = await readBody(req);
+    const items = Array.isArray(body.users) ? body.users : [];
+    const existingByName = new Map(state.users.map(u => [u.name.toLowerCase(), u]));
+    const created = [];
+    const skipped = [];
+    for (const it of items) {
+      const name = String(it && it.name || '').trim();
+      if (!name) continue;
+      if (existingByName.has(name.toLowerCase())) {
+        skipped.push(name);
+        continue;
+      }
+      const u = {
+        id: uid(), name, token: token(),
+        isAdmin: !!(it && it.isAdmin), createdAt: Date.now()
+      };
+      state.users.push(u);
+      existingByName.set(name.toLowerCase(), u);
+      created.push({
+        ...publicUser(u), token: u.token,
+        link: loginLink(req, u.token), createdAt: u.createdAt
+      });
+    }
+    if (created.length) { saveState(); broadcastChange(); }
+    return send(res, 200, { created, skipped });
+  }
+
   if (p === '/api/users') {
     if (!user.isAdmin) return send(res, 403, { error: 'forbidden' });
     if (m === 'GET') {
