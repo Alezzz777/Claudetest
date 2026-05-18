@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#1e88e5">
+<title>Управление пользователями</title>
+<link rel="manifest" href="manifest.json">
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { margin:0; padding:0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background:#f4f6f8; color:#1f2933;
+  }
+  body { min-height:100vh; display:flex; flex-direction:column; }
+
+  header {
+    position:sticky; top:0; z-index:10;
+    background:#1e88e5; color:#fff; padding:12px 14px;
+    display:flex; align-items:center; justify-content:space-between;
+    box-shadow:0 2px 6px rgba(0,0,0,.15);
+  }
+  header h1 { margin:0; font-size:17px; font-weight:600; display:flex; align-items:center; gap:8px; }
+  header a.btnlink {
+    background: rgba(255,255,255,.18); color:#fff; border:none;
+    padding:8px 12px; border-radius:8px; font-size:14px;
+    text-decoration:none; display:inline-flex; align-items:center;
+  }
+  header a.btnlink:active { background: rgba(255,255,255,.32); }
+  .conn { display:inline-block; width:8px; height:8px; border-radius:50%; background:#ffca28; }
+  .conn.ok { background:#66bb6a; } .conn.bad { background:#ef5350; }
+
+  main { flex:1; padding:14px; max-width:800px; width:100%; margin:0 auto; }
+
+  .section { background:#fff; border-radius:12px; padding:14px; margin-bottom:14px; box-shadow:0 1px 3px rgba(0,0,0,.06); }
+  .section h2 { margin:0 0 12px; font-size:16px; }
+
+  .user {
+    border:1px solid #eef2f5; border-radius:10px;
+    padding:12px; margin-bottom:8px; display:flex;
+    align-items:center; gap:10px; flex-wrap:wrap;
+  }
+  .user .info { flex:1; min-width:0; }
+  .user .name { font-weight:600; font-size:15px; }
+  .user .meta { font-size:12px; color:#607080; margin-top:2px; }
+  .badge { background:#ff9800; color:#fff; font-size:10px; padding:2px 6px; border-radius:4px; margin-left:6px; vertical-align:middle; }
+  .me-badge { background:#1e88e5; }
+  .actions { display:flex; gap:6px; flex-wrap:wrap; }
+  .actions button {
+    background:#eceff1; color:#37474f; border:none;
+    padding:7px 10px; border-radius:6px; font-size:12px; cursor:pointer;
+  }
+  .actions button.danger { background:#ffebee; color:#c62828; }
+  .actions button:active { opacity:.85; }
+
+  .link-box {
+    background:#f4f6f8; border-radius:8px; padding:8px 10px;
+    font-family: ui-monospace, "SF Mono", Monaco, monospace;
+    font-size:12px; word-break:break-all; margin-top:8px;
+    display:flex; align-items:center; gap:8px;
+  }
+  .link-box code { flex:1; }
+  .link-box button {
+    background:#1e88e5; color:#fff; border:none;
+    padding:6px 10px; border-radius:6px; font-size:11px; cursor:pointer; flex-shrink:0;
+  }
+
+  .add-row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .add-row input[type=text] {
+    flex:1; min-width:160px; padding:11px 12px;
+    border:1px solid #d0d8e0; border-radius:10px; font-size:15px; outline:none;
+  }
+  .add-row label { display:flex; align-items:center; gap:6px; font-size:13px; color:#546e7a; }
+  .btn {
+    padding:11px 16px; border-radius:10px; border:none;
+    font-size:14px; font-weight:600; cursor:pointer;
+  }
+  .btn-primary { background:#1e88e5; color:#fff; }
+  .btn:active { opacity:.85; }
+
+  .empty { text-align:center; padding:30px 16px; color:#78909c; }
+  .toast {
+    position:fixed; left:50%; bottom:24px; transform:translateX(-50%);
+    background:rgba(33,33,33,.92); color:#fff; padding:10px 16px;
+    border-radius:24px; font-size:14px; z-index:200;
+    opacity:0; transition:opacity .25s; pointer-events:none; max-width:90%;
+  }
+  .toast.show { opacity:1; }
+
+  .stat-row { display:flex; gap:14px; font-size:13px; color:#546e7a; flex-wrap:wrap; }
+  .stat-row b { color:#1f2933; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1><span class="conn" id="conn"></span> Пользователи</h1>
+  <div style="display:flex; gap:6px;">
+    <a class="btnlink" href="summary.html">📊 Сводка</a>
+    <a class="btnlink" href="index.html">← Назад</a>
+  </div>
+</header>
+
+<main id="main">
+  <div class="empty">Загрузка…</div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+
+  function readUrlToken() {
+    const params = new URLSearchParams(location.search);
+    const t = params.get('token');
+    if (t) {
+      localStorage.setItem('vt_token', t);
+      params.delete('token');
+      const q = params.toString();
+      history.replaceState({}, '', location.pathname + (q ? '?' + q : ''));
+    }
+  }
+  readUrlToken();
+  const token = () => localStorage.getItem('vt_token') || '';
+
+  let me = null;
+  let users = [];
+  let es = null;
+
+  function setConn(s) {
+    const el = $('conn');
+    el.classList.remove('ok','bad');
+    if (s === 'ok')  el.classList.add('ok');
+    if (s === 'bad') el.classList.add('bad');
+  }
+  function toast(msg) {
+    const t = $('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => t.classList.remove('show'), 2200);
+  }
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  async function api(method, path, body) {
+    const opts = {
+      method,
+      headers: { 'Content-Type':'application/json', 'Authorization':'Bearer ' + token() }
+    };
+    if (body !== undefined) opts.body = JSON.stringify(body);
+    const r = await fetch(path, opts);
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+    return data;
+  }
+
+  function copy(text) {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text).then(() => toast('Ссылка скопирована'));
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = text; document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); toast('Ссылка скопирована'); }
+      catch (e) { toast('Не удалось скопировать'); }
+      document.body.removeChild(ta);
+    }
+  }
+
+  function render() {
+    const m = $('main');
+    if (!me) {
+      m.innerHTML = '<div class="empty"><p>Не авторизованы. Откройте свою ссылку.</p><p><a href="index.html">← На главную</a></p></div>';
+      return;
+    }
+    if (!me.isAdmin) {
+      m.innerHTML = '<div class="empty"><p>Доступ только для администратора.</p><p><a href="index.html">← На главную</a></p></div>';
+      return;
+    }
+
+    const totalUsers = users.length;
+    const admins = users.filter(u => u.isAdmin).length;
+
+    m.innerHTML = `
+      <div class="section">
+        <h2>Добавить пользователя</h2>
+        <div class="add-row">
+          <input type="text" id="newName" placeholder="Имя (например: Оператор Иванов)">
+          <label><input type="checkbox" id="newAdmin"> администратор</label>
+          <button class="btn btn-primary" id="addBtn">Создать</button>
+        </div>
+        <p style="font-size:12px; color:#78909c; margin:8px 0 0;">
+          После создания будет показана ссылка для входа — передайте её пользователю.
+        </p>
+      </div>
+
+      <div class="section">
+        <h2>Пользователи (${totalUsers}, админов: ${admins})</h2>
+        <div id="userList"></div>
+      </div>
+    `;
+    $('addBtn').addEventListener('click', addUser);
+    $('newName').addEventListener('keydown', e => { if (e.key === 'Enter') addUser(); });
+    renderUsers();
+  }
+
+  function renderUsers() {
+    const list = $('userList');
+    if (users.length === 0) { list.innerHTML = '<div class="empty">Пользователей нет</div>'; return; }
+    list.innerHTML = users.map(u => `
+      <div class="user" data-id="${u.id}">
+        <div class="info">
+          <div class="name">
+            ${escapeHtml(u.name)}
+            ${u.isAdmin ? '<span class="badge">админ</span>' : ''}
+            ${u.id === me.id ? '<span class="badge me-badge">вы</span>' : ''}
+          </div>
+          <div class="meta">Участков: ${u.precinctCount} · создан ${new Date(u.createdAt).toLocaleDateString('ru-RU')}</div>
+          <div class="link-box">
+            <code>${escapeHtml(u.link)}</code>
+            <button data-copy="${u.id}">📋</button>
+          </div>
+        </div>
+        <div class="actions">
+          <button data-rename="${u.id}">Переименовать</button>
+          <button data-toggle="${u.id}">${u.isAdmin ? 'Снять права' : 'Сделать админом'}</button>
+          <button data-regen="${u.id}">Новая ссылка</button>
+          ${u.id === me.id ? '' : `<button class="danger" data-del="${u.id}">Удалить</button>`}
+        </div>
+      </div>
+    `).join('');
+
+    list.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', () => {
+      const u = users.find(x => x.id === b.dataset.copy);
+      if (u) copy(u.link);
+    }));
+    list.querySelectorAll('[data-rename]').forEach(b => b.addEventListener('click', () => renameUser(b.dataset.rename)));
+    list.querySelectorAll('[data-toggle]').forEach(b => b.addEventListener('click', () => toggleAdmin(b.dataset.toggle)));
+    list.querySelectorAll('[data-regen]').forEach(b => b.addEventListener('click', () => regenToken(b.dataset.regen)));
+    list.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', () => deleteUser(b.dataset.del)));
+  }
+
+  async function addUser() {
+    const name = $('newName').value.trim();
+    if (!name) { toast('Введите имя'); return; }
+    const isAdmin = $('newAdmin').checked;
+    try {
+      const u = await api('POST', '/api/users', { name, isAdmin });
+      $('newName').value = ''; $('newAdmin').checked = false;
+      await loadUsers();
+      toast('Создан. Скопируйте ссылку и отправьте пользователю.');
+      // auto-copy fresh link
+      setTimeout(() => copy(u.link), 200);
+    } catch (e) { toast('Ошибка: ' + e.message); }
+  }
+
+  async function renameUser(id) {
+    const u = users.find(x => x.id === id); if (!u) return;
+    const name = prompt('Новое имя:', u.name);
+    if (!name || name.trim() === u.name) return;
+    try { await api('PUT', `/api/users/${id}`, { name: name.trim() }); await loadUsers(); }
+    catch (e) { toast('Ошибка: ' + e.message); }
+  }
+
+  async function toggleAdmin(id) {
+    const u = users.find(x => x.id === id); if (!u) return;
+    if (!confirm(u.isAdmin ? `Снять права администратора у "${u.name}"?` : `Сделать "${u.name}" администратором?`)) return;
+    try { await api('PUT', `/api/users/${id}`, { isAdmin: !u.isAdmin }); await loadUsers(); }
+    catch (e) { toast('Ошибка: ' + e.message); }
+  }
+
+  async function regenToken(id) {
+    const u = users.find(x => x.id === id); if (!u) return;
+    if (!confirm(`Создать новую ссылку для "${u.name}"? Старая перестанет работать.`)) return;
+    try {
+      const r = await api('POST', `/api/users/${id}/regenerate-token`);
+      await loadUsers();
+      copy(r.link);
+      toast('Новая ссылка скопирована');
+    } catch (e) { toast('Ошибка: ' + e.message); }
+  }
+
+  async function deleteUser(id) {
+    const u = users.find(x => x.id === id); if (!u) return;
+    if (!confirm(`Удалить пользователя "${u.name}"? Его участки перейдут к вам.`)) return;
+    try { await api('DELETE', `/api/users/${id}`); await loadUsers(); }
+    catch (e) { toast('Ошибка: ' + e.message); }
+  }
+
+  async function loadUsers() {
+    try {
+      users = await api('GET', '/api/users');
+      renderUsers();
+      setConn('ok');
+    } catch (e) {
+      setConn('bad');
+      toast('Ошибка: ' + e.message);
+    }
+  }
+
+  function connect() {
+    if (es) { try { es.close(); } catch(e){} }
+    es = new EventSource('/api/events?token=' + encodeURIComponent(token()));
+    es.addEventListener('open', () => setConn('ok'));
+    es.addEventListener('error', () => setConn('bad'));
+    es.addEventListener('change', loadUsers);
+  }
+
+  async function init() {
+    if (!token()) {
+      $('main').innerHTML = '<div class="empty"><p>Откройте свою ссылку для входа.</p><p><a href="index.html">← На главную</a></p></div>';
+      return;
+    }
+    try { me = await fetch('/api/me', { headers: { 'Authorization': 'Bearer ' + token() } }).then(r => r.ok ? r.json() : null); }
+    catch (e) { me = null; }
+    if (!me) {
+      $('main').innerHTML = '<div class="empty"><p>Не авторизованы.</p><p><a href="index.html">← На главную</a></p></div>';
+      return;
+    }
+    render();
+    if (me.isAdmin) { await loadUsers(); connect(); }
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>
