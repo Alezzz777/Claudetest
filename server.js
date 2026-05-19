@@ -218,25 +218,30 @@ function precinctStats(n) {
   const voted = voters.filter(v => v.voted).length;
   return { total, voted, left: total - voted, pct: total ? (voted / total * 100) : 0 };
 }
-function nodeStats(n) {
-  if (n.type === 'precinct') return precinctStats(n);
+function nodeStats(n, allowedPrecinctIds = null) {
+  if (n.type === 'precinct') {
+    if (allowedPrecinctIds && !allowedPrecinctIds.has(n.id)) {
+      return { total: 0, voted: 0, left: 0, pct: 0 };
+    }
+    return precinctStats(n);
+  }
   let total = 0, voted = 0;
   for (const d of descendantsOf(n.id)) {
-    if (d.type === 'precinct') {
-      total += (d.voters || []).length;
-      voted += (d.voters || []).filter(v => v.voted).length;
-    }
+    if (d.type !== 'precinct') continue;
+    if (allowedPrecinctIds && !allowedPrecinctIds.has(d.id)) continue;
+    total += (d.voters || []).length;
+    voted += (d.voters || []).filter(v => v.voted).length;
   }
   return { total, voted, left: total - voted, pct: total ? (voted / total * 100) : 0 };
 }
 
-function decorateNode(n) {
+function decorateNode(n, allowedPrecinctIds = null) {
   const owner = findUser(n.ownerId);
   const out = {
     id: n.id, name: n.name, type: n.type,
     parentId: n.parentId || null,
     ownerId: n.ownerId, ownerName: owner ? owner.name : null,
-    stats: nodeStats(n),
+    stats: nodeStats(n, allowedPrecinctIds),
     childrenCount: n.type === 'precinct' ? 0 : childrenOf(n.id).length,
     path: pathFor(n)
   };
@@ -356,8 +361,12 @@ async function handleApi(req, res, parsed) {
   if (!user) return send(res, 401, { error: 'unauthorized' });
 
   if (m === 'GET' && p === '/api/state') {
+    const visible = visibleNodes(user);
+    const allowed = user.isAdmin
+      ? null
+      : new Set(visible.filter(n => n.type === 'precinct').map(n => n.id));
     return send(res, 200, {
-      nodes: visibleNodes(user).map(decorateNode),
+      nodes: visible.map(n => decorateNode(n, allowed)),
       user: publicUser(user),
       updatedAt: state.updatedAt
     });

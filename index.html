@@ -394,34 +394,18 @@
 
   function findNode(id) { return serverNodes.find(n => n.id === id); }
   function rootNodes() {
-    if (me && me.isAdmin) return serverNodes.filter(n => !n.parentId);
-    // Regular user: roots are owned nodes whose parent is NOT visible/owned
+    // Top-level nodes of the visible subtree: those whose parent is not visible.
+    // For admin this collapses to nodes without parentId; for a regular user
+    // it picks the highest visible ancestor of each owned subtree, so root
+    // stats don't double-count nested visible nodes.
     const visibleIds = new Set(serverNodes.map(n => n.id));
-    return serverNodes.filter(n => {
-      if (n.parentId && visibleIds.has(n.parentId)) {
-        const parent = findNode(n.parentId);
-        if (parent && (parent.ownerId === me.id || isOwnedAncestor(parent))) return false;
-      }
-      return n.ownerId === me.id || ownsDescendant(n);
-    });
+    return serverNodes.filter(n => !n.parentId || !visibleIds.has(n.parentId));
   }
   function isOwnedAncestor(node) {
     let cur = node;
     while (cur) {
       if (cur.ownerId === me.id) return true;
       cur = cur.parentId ? findNode(cur.parentId) : null;
-    }
-    return false;
-  }
-  function ownsDescendant(node) {
-    // any descendant in serverNodes owned by me
-    const stack = [node.id];
-    while (stack.length) {
-      const id = stack.pop();
-      for (const c of serverNodes.filter(n => n.parentId === id)) {
-        if (c.ownerId === me.id) return true;
-        stack.push(c.id);
-      }
     }
     return false;
   }
