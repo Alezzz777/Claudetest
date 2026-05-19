@@ -1,7 +1,8 @@
-// Voting tracker server — Node.js (no external deps)
+// Voting tracker server — Node.js
 // REST API + Server-Sent Events for real-time multi-user sync
 // Users with token-based login links; node hierarchy (factory/workshop/precinct).
-// Storage: data.json (atomic writes, debounced)
+// Storage: PostgreSQL (preferred, via DATABASE_URL) with automatic migration
+// from the legacy data.json; falls back to JSON-on-disk when no DB is configured.
 
 const http = require('http');
 const fs = require('fs');
@@ -12,8 +13,8 @@ const crypto = require('crypto');
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 const PUBLIC_URL = process.env.PUBLIC_URL || '';
-// Persistent data location — defaults to ./data so the directory can be
-// mounted as a persistent volume separately from the application files.
+// Persistent data location for the JSON fallback — defaults to ./data so the
+// directory can be mounted as a persistent volume separately from the application.
 // Override with DATA_DIR (folder) or DATA_FILE (full path).
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const DATA_FILE = process.env.DATA_FILE || path.join(DATA_DIR, 'data.json');
@@ -24,8 +25,172 @@ const STARTED_AT = Date.now();
 try { fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true }); }
 catch (e) { console.error('Cannot create data dir:', e.message); }
 
-const TYPES = ['factory', 'workshop', 'precinct'];
-const TYPE_LEVEL = { factory: 0, workshop: 1, precinct: 2 };
+// ---------- PostgreSQL ----------
+// If DATABASE_URL is set, state is persisted in PostgreSQL.
+// Compatible env vars are also honored by node-postgres: PGHOST, PGPORT, PGUSER,
+// PGPASSWORD, PGDATABASE.
+let pgPool = null;
+const HAS_DB = !!(process.env.DATABASE_URL || process.env.PGHOST || process.env.PGDATABASE);
+if (HAS_DB) {
+  const { Pool } = require('pg');
+  pgPool = new Pool(
+    process.env.DATABASE_URL
+      ? { connectionString: process.env.DATABASE_URL }
+      : {}
+  );
+  pgPool.on('error', (err) => console.error('PG pool error:', err.message));
+}
+
+async function dbInitSchema() {
+  if (!pgPool) return;
+  await pgPool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id          TEXT PRIMARY KEY,
+      name        TEXT NOT NULL,
+      token       TEXT NOT NULL UNIQUE,
+      is_admin    BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at  BIGINT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS nodes (
+      id          TEXT PRIMARY KEY,
+      name        TEXT NOT NULL,
+      type        TEXT NOT NULL CHECK (type IN ('factory','workshop','precinct')),
+      parent_id   TEXT REFERENCES nodes(id) ON DELETE CASCADE,
+      owner_id    TEXT NOT NULL REFERENCES users(id)
+    );
+    CREATE INDEX IF NOT EXISTS nodes_parent_idx ON nodes(parent_id);
+    CREATE INDEX IF NOT EXISTS nodes_owner_idx  ON nodes(owner_id);
+    CREATE TABLE IF NOT EXISTS voters (
+      id          TEXT PRIMARY KEY,
+      node_id     TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+      name        TEXT NOT NULL,
+      voted       BOOLEAN NOT NULL DEFAULT FALSE,
+      ts          BIGINT,
+      by_name     TEXT
+    );
+    CREATE INDEX IF NOT EXISTS voters_node_idx ON voters(node_id);
+    CREATE TABLE IF NOT EXISTS meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+  `);
+}
+
+async function dbLoadAll() {
+  if (!pgPool) return false;
+  const users = await pgPool.query('SELECT id, name, token, is_admin, created_at FROM users ORDER BY created_at');
+  const nodes = await pgPool.query('SELECT id, name, type, parent_id, owner_id FROM nodes');
+  const voters = await pgPool.query('SELECT id, node_id, name, voted, ts, by_name FROM voters ORDER BY node_id, name');
+  const meta  = await pgPool.query("SELECT value FROM meta WHERE key='updatedAt'");
+
+  state.users = users.rows.map(r => ({
+    id: r.id, name: r.name, token: r.token,
+    isAdmin: !!r.is_admin, createdAt: Number(r.created_at)
+  }));
+  const nodeMap = new Map();
+  state.nodes = nodes.rows.map(r => {
+    const n = { id: r.id, name: r.name, type: r.type, parentId: r.parent_id, ownerId: r.owner_id };
+    if (r.type === 'precinct') n.voters = [];
+    nodeMap.set(r.id, n);
+    return n;
+  });
+  for (const v of voters.rows) {
+    const n = nodeMap.get(v.node_id);
+    if (!n) continue;
+    if (!n.voters) n.voters = [];
+    n.voters.push({
+      id: v.id, name: v.name,
+      voted: !!v.voted,
+      ts: v.ts == null ? null : Number(v.ts),
+      by: v.by_name || null
+    });
+  }
+  state.updatedAt = meta.rows[0] ? Number(meta.rows[0].value) : Date.now();
+  return true;
+}
+
+function nodesTopoSorted(nodes) {
+  // parents must be inserted before children
+  const byId = new Map(nodes.map(n => [n.id, n]));
+  const out = [];
+  const visited = new Set();
+  function visit(n) {
+    if (visited.has(n.id)) return;
+    visited.add(n.id);
+    if (n.parentId && byId.has(n.parentId)) visit(byId.get(n.parentId));
+    out.push(n);
+  }
+  nodes.forEach(visit);
+  return out;
+}
+
+async function dbSyncAll() {
+  if (!pgPool) return;
+  const client = await pgPool.connect();
+  try {
+    await client.query('BEGIN');
+    // Order matters: voters depend on nodes, nodes depend on users.
+    await client.query('DELETE FROM voters');
+    await client.query('DELETE FROM nodes');
+    await client.query('DELETE FROM users');
+
+    for (const u of state.users) {
+      await client.query(
+        'INSERT INTO users (id,name,token,is_admin,created_at) VALUES ($1,$2,$3,$4,$5)',
+        [u.id, u.name, u.token, !!u.isAdmin, Number(u.createdAt) || Date.now()]
+      );
+    }
+    for (const n of nodesTopoSorted(state.nodes)) {
+      await client.query(
+        'INSERT INTO nodes (id,name,type,parent_id,owner_id) VALUES ($1,$2,$3,$4,$5)',
+        [n.id, n.name, n.type, n.parentId || null, n.ownerId]
+      );
+      if (n.type === 'precinct') {
+        for (const v of (n.voters || [])) {
+          await client.query(
+            'INSERT INTO voters (id,node_id,name,voted,ts,by_name) VALUES ($1,$2,$3,$4,$5,$6)',
+            [v.id, n.id, v.name, !!v.voted, v.ts || null, v.by || null]
+          );
+        }
+      }
+    }
+    await client.query(
+      `INSERT INTO meta(key,value) VALUES('updatedAt',$1)
+       ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value`,
+      [String(state.updatedAt)]
+    );
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+async function dbIsEmpty() {
+  if (!pgPool) return true;
+  const r = await pgPool.query('SELECT COUNT(*)::int AS c FROM users');
+  return r.rows[0].c === 0;
+}
+
+async function maybeMigrateFromJson() {
+  if (!pgPool) return false;
+  if (!fs.existsSync(DATA_FILE)) return false;
+  if (!await dbIsEmpty()) return false;
+  console.log('Migrating data from JSON to PostgreSQL...');
+  loadState();
+  if (state.users.length === 0 && state.nodes.length === 0) {
+    state = { users: [], nodes: [], updatedAt: Date.now() };
+    return false;
+  }
+  await dbSyncAll();
+  const backup = DATA_FILE + '.migrated-' + Date.now();
+  try { fs.renameSync(DATA_FILE, backup); console.log(`JSON archived → ${backup}`); }
+  catch (e) { console.warn('Could not archive JSON:', e.message); }
+  console.log(`Migrated ${state.users.length} users, ${state.nodes.length} nodes to PostgreSQL`);
+  return true;
+}
 
 let state = {
   users: [],   // [{id, name, token, isAdmin, createdAt}]
@@ -41,7 +206,6 @@ function loadState() {
       if (Array.isArray(data.nodes)) {
         state.nodes = data.nodes;
       } else if (Array.isArray(data.precincts)) {
-        // legacy migration: precincts → nodes
         state.nodes = data.precincts.map(p => ({
           id: p.id, name: p.name, type: 'precinct',
           parentId: null, ownerId: p.ownerId,
@@ -56,25 +220,42 @@ function loadState() {
 }
 
 let saveTimer = null;
+let lastSaveError = null;
 function saveState() {
   state.updatedAt = Date.now();
   if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
+  saveTimer = setTimeout(async () => {
     try {
-      fs.writeFileSync(TMP_FILE, JSON.stringify({
-        users: state.users,
-        nodes: state.nodes,
-        updatedAt: state.updatedAt
-      }, null, 2));
-      fs.renameSync(TMP_FILE, DATA_FILE);
-    } catch (e) { console.error('Save failed:', e.message); }
-  }, 150);
+      if (pgPool) {
+        await dbSyncAll();
+      } else {
+        fs.writeFileSync(TMP_FILE, JSON.stringify({
+          users: state.users,
+          nodes: state.nodes,
+          updatedAt: state.updatedAt
+        }, null, 2));
+        fs.renameSync(TMP_FILE, DATA_FILE);
+      }
+      lastSaveError = null;
+    } catch (e) {
+      lastSaveError = e.message;
+      console.error('Save failed:', e.message);
+    }
+  }, 120);
 }
 
 function uid()   { return crypto.randomBytes(6).toString('hex'); }
 function token() { return crypto.randomBytes(18).toString('base64url'); }
 
-function bootstrap() {
+async function bootstrap() {
+  if (pgPool) {
+    await dbInitSchema();
+    await maybeMigrateFromJson();
+    await dbLoadAll();
+  } else {
+    loadState();
+  }
+
   let firstAdmin = state.users.find(u => u.isAdmin);
   if (state.nodes.some(n => !n.ownerId) && !firstAdmin) {
     firstAdmin = { id: uid(), name: 'Администратор', token: token(), isAdmin: true, createdAt: Date.now() };
@@ -82,11 +263,13 @@ function bootstrap() {
   }
   state.nodes.forEach(n => { if (!n.ownerId && firstAdmin) n.ownerId = firstAdmin.id; });
 
+  let createdNewAdmin = false;
   if (state.users.length === 0) {
     const t = token();
     state.users.push({
       id: uid(), name: 'Администратор', token: t, isAdmin: true, createdAt: Date.now()
     });
+    createdNewAdmin = true;
     const link = `${PUBLIC_URL || `http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`}/?token=${t}`;
     try { fs.writeFileSync(ADMIN_LINK_FILE, link + '\n'); } catch (e) {}
     console.log('\n==================================================');
@@ -95,7 +278,8 @@ function bootstrap() {
     console.log('  (также сохранена в admin-link.txt)');
     console.log('==================================================\n');
   }
-  saveState();
+  if (createdNewAdmin && pgPool) await dbSyncAll();
+  else saveState();
 }
 
 // ---------- SSE clients ----------
@@ -281,22 +465,43 @@ function serveStatic(res, entry) {
 }
 
 // ---------- API ----------
-function healthPayload() {
-  let dataFileInfo = { exists: false };
-  try {
-    if (fs.existsSync(DATA_FILE)) {
-      const st = fs.statSync(DATA_FILE);
-      dataFileInfo = { exists: true, sizeBytes: st.size, modified: st.mtime.toISOString() };
+async function healthPayload() {
+  const storage = { kind: pgPool ? 'postgres' : 'json' };
+  if (pgPool) {
+    try {
+      const r = await pgPool.query('SELECT 1 AS ok');
+      storage.connected = r.rows[0].ok === 1;
+      storage.poolTotal = pgPool.totalCount;
+      storage.poolIdle = pgPool.idleCount;
+      storage.poolWaiting = pgPool.waitingCount;
+    } catch (e) {
+      storage.connected = false;
+      storage.error = e.message;
     }
-  } catch (e) { dataFileInfo = { exists: false, error: e.message }; }
+  } else {
+    try {
+      if (fs.existsSync(DATA_FILE)) {
+        const st = fs.statSync(DATA_FILE);
+        storage.path = DATA_FILE;
+        storage.exists = true;
+        storage.sizeBytes = st.size;
+        storage.modified = st.mtime.toISOString();
+      } else {
+        storage.path = DATA_FILE;
+        storage.exists = false;
+      }
+    } catch (e) { storage.error = e.message; }
+  }
+  const healthy = pgPool ? !!storage.connected : true;
   return {
-    status: 'ok',
+    status: healthy && !lastSaveError ? 'ok' : 'degraded',
     uptimeSeconds: Math.floor((Date.now() - STARTED_AT) / 1000),
     timestamp: new Date().toISOString(),
     nodeVersion: process.version,
     pid: process.pid,
     counts: { users: state.users.length, nodes: state.nodes.length, clients: clients.size },
-    storage: { path: DATA_FILE, ...dataFileInfo }
+    storage,
+    lastSaveError
   };
 }
 
@@ -328,7 +533,7 @@ async function handleApi(req, res, parsed) {
 
   // ---------- Public endpoints (no auth) ----------
   if (m === 'GET' && (p === '/api/health' || p === '/health')) {
-    return send(res, 200, healthPayload());
+    return send(res, 200, await healthPayload());
   }
   if (m === 'GET' && p === '/api/summary') {
     return send(res, 200, publicSummary());
@@ -751,7 +956,7 @@ const server = http.createServer(async (req, res) => {
 
   const parsed = url.parse(req.url, true);
   if (req.method === 'GET' && parsed.pathname === '/health') {
-    return send(res, 200, healthPayload());
+    return send(res, 200, await healthPayload());
   }
   if (parsed.pathname.startsWith('/api/')) {
     try { await handleApi(req, res, parsed); }
@@ -763,10 +968,29 @@ const server = http.createServer(async (req, res) => {
   send(res, 404, 'Not found');
 });
 
-loadState();
-bootstrap();
-server.listen(PORT, HOST, () => {
-  console.log(`Voting tracker running on http://${HOST}:${PORT}`);
-  console.log(`Data file: ${DATA_FILE}`);
-  console.log(`Health:    http://${HOST}:${PORT}/health`);
-});
+(async () => {
+  try {
+    await bootstrap();
+  } catch (e) {
+    console.error('Bootstrap failed:', e);
+    process.exit(1);
+  }
+  server.listen(PORT, HOST, () => {
+    console.log(`Voting tracker running on http://${HOST}:${PORT}`);
+    console.log(`Storage:   ${pgPool ? 'PostgreSQL' : 'JSON file (' + DATA_FILE + ')'}`);
+    console.log(`Health:    http://${HOST}:${PORT}/health`);
+  });
+})();
+
+async function shutdown(sig) {
+  console.log(`\n${sig} — shutting down`);
+  try {
+    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+    if (pgPool) {
+      await dbSyncAll().catch(e => console.error('Final sync failed:', e.message));
+      await pgPool.end().catch(() => {});
+    }
+  } finally { process.exit(0); }
+}
+process.on('SIGINT',  () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));

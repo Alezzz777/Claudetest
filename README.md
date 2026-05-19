@@ -61,26 +61,26 @@ node server.js
 - `PUBLIC_URL` (например `https://voting.example.com`) — используется в
   ссылках для пользователей. Если не задан, берётся хост из заголовков
   запроса.
-- `DATA_DIR` — каталог для постоянного хранения данных (`data.json` и
-  `admin-link.txt`). По умолчанию — папка приложения. **В контейнерной
-  среде укажите смонтированный persistent-volume**, например
-  `DATA_DIR=/data`.
-- `DATA_FILE` — полный путь к файлу состояния (имеет приоритет над
-  `DATA_DIR`).
+- **Хранилище — PostgreSQL** (рекомендуется):
+  - `DATABASE_URL` — строка подключения, например
+    `postgres://voting:voting@db:5432/voting`. Если задана —
+    приложение использует PostgreSQL: создаёт схему (`users`, `nodes`,
+    `voters`, `meta`) и грузит/пишет состояние через неё.
+  - Альтернативно поддерживаются переменные `PGHOST`, `PGPORT`, `PGUSER`,
+    `PGPASSWORD`, `PGDATABASE` (стандарт `node-postgres`).
+- **Хранилище — JSON** (fallback, если БД не задана):
+  - `DATA_DIR` — каталог для `data.json` и `admin-link.txt` (по умолчанию
+    `./data/`).
+  - `DATA_FILE` — полный путь к файлу состояния (приоритет над `DATA_DIR`).
 
-Пример запуска с persistent volume (Docker):
+**Автоматическая миграция JSON → PostgreSQL.** Если задан `DATABASE_URL` и
+таблицы пусты, но на диске есть `data.json` — при старте состояние
+будет перенесено в БД (с сохранением `id`, токенов, отметок голосования,
+владельцев). После миграции `data.json` переименовывается в
+`data.json.migrated-<timestamp>` как бэкап. Дальнейшие изменения идут
+только в PostgreSQL.
 
-```bash
-docker run -d \
-  -p 3000:3000 \
-  -e DATA_DIR=/data \
-  -v voting-data:/data \
-  --restart=always \
-  my-voting-tracker
-```
-
-При первом запуске каталог создаётся (`mkdir -p`); если файл уже есть —
-состояние загружается с него.
+Пример запуска с PostgreSQL (Docker Compose) — см. `docker-compose.yml`.
 
 При первом запуске автоматически создаётся пользователь-администратор;
 **ссылка для входа выводится в консоль и сохраняется в `admin-link.txt`**.
@@ -93,9 +93,11 @@ docker run -d \
 
 Служебные endpoints:
 - `GET /health` и `GET /api/health` — статус сервиса для оркестратора /
-  балансировщика. Без авторизации. Возвращают JSON: `status`, `uptimeSeconds`,
-  `timestamp`, `nodeVersion`, `pid`, `counts.{users,nodes,clients}`,
-  `storage.{path,exists,sizeBytes,modified}`.
+  балансировщика. Без авторизации. Возвращают JSON:
+  `status` (`ok` / `degraded`), `uptimeSeconds`, `timestamp`, `nodeVersion`,
+  `pid`, `counts.{users,nodes,clients}`, `lastSaveError` и `storage`:
+  - для PostgreSQL: `{kind:"postgres", connected, poolTotal, poolIdle, poolWaiting}`
+  - для JSON: `{kind:"json", path, exists, sizeBytes, modified}`.
 
 ## Использование
 

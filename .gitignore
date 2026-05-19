@@ -2,5 +2,7 @@ node_modules/
 data/
 data.json
 data.json.tmp
+data.json.migrated-*
+pgdata/
 admin-link.txt
 *.log
