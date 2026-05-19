@@ -4,7 +4,7 @@ services:
     container_name: mobile-voting
     restart: unless-stopped
     environment:
-      - DATA_DIR=/data
+      - DATA_FILE=/data/data.json
     expose:
       - "3000"
     networks:
