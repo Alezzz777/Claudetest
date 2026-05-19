@@ -12,11 +12,17 @@ const crypto = require('crypto');
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 const PUBLIC_URL = process.env.PUBLIC_URL || '';
-const DATA_FILE = path.join(__dirname, 'data', 'data.json');
-const TMP_FILE = path.join(__dirname, 'data', 'data.json.tmp');
-//const DATA_FILE = path.join(__dirname, 'data.json');
-//const TMP_FILE  = DATA_FILE + '.tmp';
-const ADMIN_LINK_FILE = path.join(__dirname, 'admin-link.txt');
+// Persistent data location — defaults to ./data so the directory can be
+// mounted as a persistent volume separately from the application files.
+// Override with DATA_DIR (folder) or DATA_FILE (full path).
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
+const DATA_FILE = process.env.DATA_FILE || path.join(DATA_DIR, 'data.json');
+const TMP_FILE  = DATA_FILE + '.tmp';
+const ADMIN_LINK_FILE = path.join(path.dirname(DATA_FILE), 'admin-link.txt');
+const STARTED_AT = Date.now();
+
+try { fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true }); }
+catch (e) { console.error('Cannot create data dir:', e.message); }
 
 const TYPES = ['factory', 'workshop', 'precinct'];
 const TYPE_LEVEL = { factory: 0, workshop: 1, precinct: 2 };
@@ -251,29 +257,6 @@ function visibleNodes(user) {
   return state.nodes.filter(n => visible.has(n.id));
 }
 
-function summary(user) {
-  const list = user.isAdmin ? state.nodes : visibleNodes(user);
-  const precincts = list.filter(n => n.type === 'precinct').map(p => {
-    const s = precinctStats(p);
-    return {
-      id: p.id, name: p.name, ownerName: findUser(p.ownerId)?.name || '—',
-      path: pathFor(p),
-      total: s.total, voted: s.voted, left: s.left, pct: s.pct
-    };
-  });
-  let total = 0, voted = 0;
-  precincts.forEach(p => { total += p.total; voted += p.voted; });
-  // also factories rollup for admin
-  const factories = list.filter(n => n.type === 'factory').map(f => {
-    const s = nodeStats(f);
-    return { id: f.id, name: f.name, total: s.total, voted: s.voted, left: s.left, pct: s.pct };
-  });
-  return {
-    total, voted, left: total - voted, pct: total ? (voted/total*100) : 0,
-    precincts, factories, updatedAt: state.updatedAt
-  };
-}
-
 // ---------- Static ----------
 const STATIC = {
   '/':              { file: 'index.html',   type: 'text/html; charset=utf-8' },
@@ -293,9 +276,59 @@ function serveStatic(res, entry) {
 }
 
 // ---------- API ----------
+function healthPayload() {
+  let dataFileInfo = { exists: false };
+  try {
+    if (fs.existsSync(DATA_FILE)) {
+      const st = fs.statSync(DATA_FILE);
+      dataFileInfo = { exists: true, sizeBytes: st.size, modified: st.mtime.toISOString() };
+    }
+  } catch (e) { dataFileInfo = { exists: false, error: e.message }; }
+  return {
+    status: 'ok',
+    uptimeSeconds: Math.floor((Date.now() - STARTED_AT) / 1000),
+    timestamp: new Date().toISOString(),
+    nodeVersion: process.version,
+    pid: process.pid,
+    counts: { users: state.users.length, nodes: state.nodes.length, clients: clients.size },
+    storage: { path: DATA_FILE, ...dataFileInfo }
+  };
+}
+
+function publicSummary() {
+  const precincts = state.nodes.filter(n => n.type === 'precinct').map(p => {
+    const s = precinctStats(p);
+    return {
+      id: p.id, name: p.name,
+      path: pathFor(p),
+      total: s.total, voted: s.voted, left: s.left, pct: s.pct
+    };
+  });
+  let total = 0, voted = 0;
+  precincts.forEach(p => { total += p.total; voted += p.voted; });
+  const factories = state.nodes.filter(n => n.type === 'factory').map(f => {
+    const s = nodeStats(f);
+    return { id: f.id, name: f.name, total: s.total, voted: s.voted, left: s.left, pct: s.pct };
+  });
+  return {
+    total, voted, left: total - voted,
+    pct: total ? (voted/total*100) : 0,
+    precincts, factories, updatedAt: state.updatedAt
+  };
+}
+
 async function handleApi(req, res, parsed) {
   const p = parsed.pathname;
   const m = req.method;
+
+  // ---------- Public endpoints (no auth) ----------
+  if (m === 'GET' && (p === '/api/health' || p === '/health')) {
+    return send(res, 200, healthPayload());
+  }
+  if (m === 'GET' && p === '/api/summary') {
+    return send(res, 200, publicSummary());
+  }
+
   const user = getAuth(req, parsed);
 
   if (m === 'GET' && p === '/api/events') {
@@ -328,10 +361,6 @@ async function handleApi(req, res, parsed) {
       user: publicUser(user),
       updatedAt: state.updatedAt
     });
-  }
-
-  if (m === 'GET' && p === '/api/summary') {
-    return send(res, 200, summary(user));
   }
 
   // ---------- Users ----------
@@ -712,6 +741,9 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
 
   const parsed = url.parse(req.url, true);
+  if (req.method === 'GET' && parsed.pathname === '/health') {
+    return send(res, 200, healthPayload());
+  }
   if (parsed.pathname.startsWith('/api/')) {
     try { await handleApi(req, res, parsed); }
     catch (e) { console.error('API error:', e.message); send(res, 500, { error: e.message }); }
@@ -726,4 +758,6 @@ loadState();
 bootstrap();
 server.listen(PORT, HOST, () => {
   console.log(`Voting tracker running on http://${HOST}:${PORT}`);
+  console.log(`Data file: ${DATA_FILE}`);
+  console.log(`Health:    http://${HOST}:${PORT}/health`);
 });

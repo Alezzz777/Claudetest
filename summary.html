@@ -267,34 +267,40 @@
 
   async function fetchSummary() {
     try {
-      const r = await fetch('/api/summary', { headers: { 'Authorization': 'Bearer ' + token() } });
-      if (r.status === 401) {
-        setConn('bad');
-        $('main').innerHTML = '<div class="empty"><p>Не авторизованы. Откройте свою ссылку.</p><p><a href="index.html">← На главную</a></p></div>';
-        return;
-      }
-      if (r.status === 403) {
-        setConn('bad');
-        $('main').innerHTML = '<div class="empty"><p>Сводка доступна только администратору.</p><p><a href="index.html">← На главную</a></p></div>';
-        return;
-      }
+      const r = await fetch('/api/summary');
+      if (!r.ok) { setConn('bad'); return; }
       summary = await r.json();
       setConn('ok');
       render();
     } catch (e) { setConn('bad'); }
   }
 
+  let pollTimer = null;
+  function startPolling() {
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(fetchSummary, 5000);
+  }
+  function stopPolling() {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  }
+
   function connect() {
-    if (es) { try { es.close(); } catch(e){} }
-    es = new EventSource('/api/events?token=' + encodeURIComponent(token()));
-    es.addEventListener('open', () => setConn('ok'));
-    es.addEventListener('error', () => setConn('bad'));
-    es.addEventListener('change', fetchSummary);
+    // If we have a token — use SSE for instant updates. Otherwise poll.
+    if (token()) {
+      if (es) { try { es.close(); } catch(e){} }
+      es = new EventSource('/api/events?token=' + encodeURIComponent(token()));
+      es.addEventListener('open', () => setConn('ok'));
+      es.addEventListener('error', () => { setConn('bad'); startPolling(); });
+      es.addEventListener('change', fetchSummary);
+    } else {
+      startPolling();
+    }
   }
 
   fetchSummary().then(connect);
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) fetchSummary();
+    if (!document.hidden) { fetchSummary(); if (!es && !pollTimer) startPolling(); }
+    else { stopPolling(); }
   });
 })();
 </script>
