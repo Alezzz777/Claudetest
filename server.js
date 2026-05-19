@@ -198,6 +198,9 @@ let state = {
   updatedAt: Date.now()
 };
 
+const TYPES = ['factory', 'workshop', 'precinct'];
+const TYPE_LEVEL = { factory: 0, workshop: 1, precinct: 2 };
+
 function loadState() {
   try {
     if (fs.existsSync(DATA_FILE)) {
