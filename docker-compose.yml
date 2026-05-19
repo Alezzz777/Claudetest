@@ -3,13 +3,8 @@ services:
     build: .
     container_name: mobile-voting
     restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
     environment:
-      - DATABASE_URL=postgres://voting:voting@db:5432/voting
-      # JSON-fallback is also configured so that an existing data.json on the
-      # mounted volume is auto-migrated to PostgreSQL on first start.
+      - DATABASE_URL=postgres://admin:ctJcRTxH028pc4Svh4ti@postgres:5432/voting
       - DATA_FILE=/app/data/data.json
     expose:
       - "3000"
@@ -17,24 +12,6 @@ services:
       - build_default
     volumes:
       - ../data:/app/data
-
-  db:
-    image: postgres:16-alpine
-    container_name: mobile-voting-db
-    restart: unless-stopped
-    environment:
-      - POSTGRES_USER=voting
-      - POSTGRES_PASSWORD=voting
-      - POSTGRES_DB=voting
-    volumes:
-      - ../pgdata:/var/lib/postgresql/data
-    networks:
-      - build_default
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U voting -d voting"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
 
 networks:
   build_default:
