@@ -3,6 +3,8 @@ services:
     build: .
     container_name: mobile-voting
     restart: unless-stopped
+    environment:
+      - DATA_DIR=/data
     expose:
       - "3000"
     networks:
