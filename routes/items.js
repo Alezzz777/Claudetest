@@ -7,16 +7,28 @@ router.use(authenticate);
 
 // Fetch full item info by id or barcode
 async function loadItem(client, key) {
-    const isNumeric = /^\d+$/.test(String(key));
-    const q = `
+    const str = String(key);
+    // PostgreSQL INTEGER max is 2 147 483 647 (10 digits). EAN-13 barcodes are
+    // 13 digits and overflow integer cast — search by id only for short
+    // numeric strings, otherwise look up by barcode.
+    const asInt = /^\d+$/.test(str) && str.length <= 9 ? parseInt(str, 10) : null;
+
+    const select = `
         SELECT i.*, n.code AS nom_code, n.name AS nom_name,
                op.seq AS current_seq, op.name AS current_op_name
         FROM items i
         JOIN nomenclatures n ON n.id = i.nomenclature_id
-        LEFT JOIN operations op ON op.id = i.current_operation_id
-        WHERE ${isNumeric ? 'i.id = $1 OR i.barcode = $1::text' : 'i.barcode = $1'}
-        LIMIT 1`;
-    const { rows } = await client.query(q, [String(key)]);
+        LEFT JOIN operations op ON op.id = i.current_operation_id`;
+
+    let q, params;
+    if (asInt !== null) {
+        q = `${select} WHERE i.id = $1 OR i.barcode = $2 LIMIT 1`;
+        params = [asInt, str];
+    } else {
+        q = `${select} WHERE i.barcode = $1 LIMIT 1`;
+        params = [str];
+    }
+    const { rows } = await client.query(q, params);
     return rows[0] || null;
 }
 

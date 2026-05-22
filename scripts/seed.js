@@ -44,6 +44,7 @@ async function upsertNomenclature(code, name, operations) {
         await upsertUser('foreman', 'Пётр Бригадир',    'foreman', 'foreman123');
         await upsertUser('foreman2','Олег Лебедев',     'foreman', 'foreman123');
         await upsertUser('master',  'Сергей Мастер',    'master',  'master123');
+        await upsertUser('admin',   'Администратор',    'admin',   'admin123');
 
         await upsertNomenclature('VAL-001', 'Вал ведущий', [
             'Заготовка',
@@ -64,7 +65,7 @@ async function upsertNomenclature(code, name, operations) {
         ]);
 
         console.log('Seed completed.');
-        console.log('Users: worker/worker123, foreman/foreman123, master/master123');
+        console.log('Users: worker/worker123, foreman/foreman123, master/master123, admin/admin123');
         process.exit(0);
     } catch (err) {
         console.error('Seed failed:', err.message);

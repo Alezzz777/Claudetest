@@ -634,6 +634,49 @@ input:focus, select:focus, textarea:focus {
 .brigade-add summary { cursor: pointer; font-weight: 500; }
 .brigade-add[open] summary { margin-bottom: 1rem; }
 
+/* ---- USERS ---- */
+.users-controls { margin-bottom: 1rem; }
+.user-list { display: flex; flex-direction: column; gap: .5rem; margin-bottom: 1rem; }
+.user-card {
+    background: var(--card);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: .85rem 1rem;
+}
+.user-card.inactive { opacity: .55; }
+.user-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: .75rem;
+    flex-wrap: wrap;
+}
+.user-head .name { font-weight: 600; }
+.user-head .login {
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    color: var(--muted);
+    font-size: .85rem;
+}
+.role-pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: .75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+}
+.role-worker  { background: #e7f3fe; color: #084298; }
+.role-foreman { background: #fff3cd; color: #664d03; }
+.role-master  { background: #d1e7dd; color: #0a3622; }
+.role-admin   { background: #f8d7da; color: #58151c; }
+.user-actions {
+    display: flex;
+    gap: .35rem;
+    flex-wrap: wrap;
+    margin-top: .5rem;
+}
+
 /* ---- TABLET ---- */
 @media (min-width: 1024px) {
     .topbar-title { font-size: 1.15rem; }

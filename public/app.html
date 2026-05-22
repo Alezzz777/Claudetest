@@ -18,12 +18,13 @@
     </header>
 
     <nav class="tabs" role="tablist">
-        <button class="tab active" data-tab="scan">Сканер</button>
-        <button class="tab" data-tab="kanban">Канбан</button>
-        <button class="tab" data-tab="list">Изделия</button>
+        <button class="tab active" data-tab="scan" data-role="worker foreman master">Сканер</button>
+        <button class="tab" data-tab="kanban" data-role="worker foreman master">Канбан</button>
+        <button class="tab" data-tab="list" data-role="worker foreman master">Изделия</button>
         <button class="tab" data-tab="launch" data-role="master">Запуск</button>
         <button class="tab" data-tab="brigades" data-role="foreman master">Бригады</button>
-        <button class="tab" data-tab="nomenclatures">Номенклатуры</button>
+        <button class="tab" data-tab="nomenclatures" data-role="worker foreman master">Номенклатуры</button>
+        <button class="tab" data-tab="users" data-role="admin">Пользователи</button>
     </nav>
 
     <main class="content">
@@ -133,6 +134,40 @@
                     </label>
                     <button type="submit" class="btn primary">Создать</button>
                     <div id="brigade-msg" class="error-banner hidden"></div>
+                </form>
+            </details>
+        </section>
+
+        <!-- USERS TAB (admin only) -->
+        <section class="tab-panel" data-panel="users">
+            <div class="users-controls">
+                <label class="kanban-toggle">
+                    <input type="checkbox" id="users-show-inactive"> показывать отключённых
+                </label>
+            </div>
+            <div id="users-list" class="user-list"></div>
+            <details id="user-add-wrap" class="brigade-add">
+                <summary>+ Создать пользователя</summary>
+                <form id="user-form" class="card-form">
+                    <label>Логин
+                        <input type="text" name="username" required autocomplete="off" maxlength="64">
+                    </label>
+                    <label>ФИО
+                        <input type="text" name="full_name" required maxlength="255">
+                    </label>
+                    <label>Роль
+                        <select name="role" required>
+                            <option value="worker">Рабочий</option>
+                            <option value="foreman">Бригадир</option>
+                            <option value="master">Мастер</option>
+                            <option value="admin">Администратор</option>
+                        </select>
+                    </label>
+                    <label>Пароль (минимум 6 символов)
+                        <input type="text" name="password" required minlength="6" autocomplete="off">
+                    </label>
+                    <button type="submit" class="btn primary">Создать</button>
+                    <div id="user-msg" class="error-banner hidden"></div>
                 </form>
             </details>
         </section>

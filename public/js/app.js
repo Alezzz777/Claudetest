@@ -2,7 +2,12 @@
     const user = api.currentUser();
     if (!user) { location.href = '/'; return; }
 
-    const ROLE_LABELS = { worker: 'Рабочий', foreman: 'Бригадир', master: 'Мастер' };
+    const ROLE_LABELS = {
+        worker: 'Рабочий',
+        foreman: 'Бригадир',
+        master: 'Мастер',
+        admin: 'Администратор',
+    };
     const STATUS_LABELS = {
         created: 'Создано',
         in_progress: 'В работе',
@@ -33,6 +38,16 @@
         t.addEventListener('click', () => activateTab(t.dataset.tab));
     });
 
+    // If the default "Сканер" tab is hidden for this role (e.g. admin),
+    // activate the first visible tab instead.
+    const defaultTab = document.querySelector('.tab.active:not([hidden])')
+                    || document.querySelector('.tab:not([hidden])');
+    if (defaultTab) {
+        document.querySelectorAll('.tab.active').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-panel.active').forEach(p => p.classList.remove('active'));
+        activateTab(defaultTab.dataset.tab);
+    }
+
     function activateTab(name) {
         document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
         document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.panel === name));
@@ -41,6 +56,7 @@
         if (name === 'nomenclatures') loadNomenclatures();
         if (name === 'kanban') loadKanban();
         if (name === 'brigades') loadBrigades();
+        if (name === 'users') loadUsers();
     }
 
     // ---------- SCAN TAB ----------
@@ -796,6 +812,112 @@
             brigadeMsg.className = 'error-banner';
             brigadeMsg.textContent = err.message;
             brigadeMsg.classList.remove('hidden');
+        }
+    });
+
+    // ---------- USERS TAB (admin) ----------
+    const usersList = document.getElementById('users-list');
+    const userForm = document.getElementById('user-form');
+    const userMsg = document.getElementById('user-msg');
+    const usersShowInactive = document.getElementById('users-show-inactive');
+    const userAddWrap = document.getElementById('user-add-wrap');
+
+    usersShowInactive.addEventListener('change', loadUsers);
+
+    async function loadUsers() {
+        usersList.innerHTML = '<div class="muted">Загрузка…</div>';
+        const params = new URLSearchParams();
+        if (usersShowInactive.checked) params.set('include_inactive', '1');
+        try {
+            const users = await api.get('/api/users?' + params.toString());
+            if (!users.length) {
+                usersList.innerHTML = '<div class="muted">Пользователей нет</div>';
+                return;
+            }
+            usersList.innerHTML = users.map(u => {
+                const isSelf = u.id === user.id;
+                return `
+                    <div class="user-card ${u.active ? '' : 'inactive'}" data-uid="${u.id}">
+                        <div class="user-head">
+                            <div>
+                                <div class="name">${escapeHtml(u.full_name)} ${isSelf ? '<small class="muted">(вы)</small>' : ''}</div>
+                                <div class="login">${escapeHtml(u.username)}</div>
+                            </div>
+                            <span class="role-pill role-${u.role}">${ROLE_LABELS[u.role] || u.role}</span>
+                        </div>
+                        <div class="user-actions">
+                            <button class="btn small" data-action="rename">ФИО</button>
+                            <button class="btn small" data-action="role">Роль</button>
+                            <button class="btn small" data-action="password">Сброс пароля</button>
+                            ${u.active
+                                ? `<button class="btn small danger" data-action="deactivate" ${isSelf ? 'disabled title="Нельзя деактивировать себя"' : ''}>Отключить</button>`
+                                : `<button class="btn small success" data-action="activate">Включить</button>`}
+                        </div>
+                    </div>`;
+            }).join('');
+            bindUserHandlers(users);
+        } catch (err) {
+            usersList.innerHTML = `<div class="error-banner">${escapeHtml(err.message)}</div>`;
+        }
+    }
+
+    function bindUserHandlers(users) {
+        usersList.querySelectorAll('.user-card').forEach(card => {
+            const uid = +card.dataset.uid;
+            const u = users.find(x => x.id === uid);
+            card.querySelectorAll('button[data-action]').forEach(btn => {
+                btn.addEventListener('click', () => userAction(u, btn.dataset.action));
+            });
+        });
+    }
+
+    async function userAction(u, action) {
+        try {
+            if (action === 'rename') {
+                const v = prompt('Новое ФИО:', u.full_name);
+                if (v === null || !v.trim()) return;
+                await api.patch('/api/users/' + u.id, { full_name: v.trim() });
+            } else if (action === 'role') {
+                const map = { '1': 'worker', '2': 'foreman', '3': 'master', '4': 'admin' };
+                const v = prompt(
+                    `Выберите новую роль:\n1. Рабочий\n2. Бригадир\n3. Мастер\n4. Администратор\n\nТекущая: ${ROLE_LABELS[u.role]}`,
+                    '');
+                if (v === null) return;
+                const newRole = map[v.trim()];
+                if (!newRole) return alert('Некорректный выбор');
+                if (newRole === u.role) return;
+                await api.patch('/api/users/' + u.id, { role: newRole });
+            } else if (action === 'password') {
+                const v = prompt('Новый пароль (минимум 6 символов):', '');
+                if (v === null) return;
+                if (v.length < 6) return alert('Пароль слишком короткий');
+                await api.patch('/api/users/' + u.id, { password: v });
+                alert('Пароль обновлён');
+            } else if (action === 'deactivate') {
+                if (!confirm(`Отключить ${u.full_name}? Пользователь не сможет войти.`)) return;
+                await api.patch('/api/users/' + u.id, { active: false });
+            } else if (action === 'activate') {
+                await api.patch('/api/users/' + u.id, { active: true });
+            }
+            loadUsers();
+        } catch (err) {
+            alert(err.message);
+        }
+    }
+
+    userForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        userMsg.classList.add('hidden');
+        const data = Object.fromEntries(new FormData(userForm).entries());
+        try {
+            await api.post('/api/users', data);
+            userForm.reset();
+            userAddWrap.open = false;
+            loadUsers();
+        } catch (err) {
+            userMsg.className = 'error-banner';
+            userMsg.textContent = err.message;
+            userMsg.classList.remove('hidden');
         }
     });
 

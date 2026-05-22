@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS users (
     username VARCHAR(64) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     full_name VARCHAR(255) NOT NULL,
-    role VARCHAR(16) NOT NULL CHECK (role IN ('worker', 'foreman', 'master')),
+    role VARCHAR(16) NOT NULL CHECK (role IN ('worker', 'foreman', 'master', 'admin')),
     active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -64,6 +64,11 @@ CREATE TABLE IF NOT EXISTS brigades (
     foreman_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Widen role enum to include 'admin' on existing databases (idempotent)
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
+ALTER TABLE users ADD CONSTRAINT users_role_check
+    CHECK (role IN ('worker', 'foreman', 'master', 'admin'));
 
 CREATE TABLE IF NOT EXISTS brigade_members (
     brigade_id INTEGER NOT NULL REFERENCES brigades(id) ON DELETE CASCADE,
