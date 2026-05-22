@@ -550,6 +550,90 @@ input:focus, select:focus, textarea:focus {
     .launch-result-actions { display: none; }
 }
 
+/* ---- BRIGADES ---- */
+.brigade-list { display: flex; flex-direction: column; gap: .75rem; margin-bottom: 1rem; }
+.brigade-card {
+    background: var(--card);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 1rem;
+}
+.brigade-card.is-mine { border-left: 4px solid var(--primary); }
+.brigade-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: .75rem;
+    flex-wrap: wrap;
+}
+.brigade-head h3 { margin: 0; font-size: 1.05rem; }
+.brigade-head .meta { color: var(--muted); font-size: .85rem; }
+.brigade-foreman {
+    display: inline-block;
+    background: #e7f3fe;
+    color: #084298;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: .8rem;
+    margin-right: .35rem;
+}
+.brigade-count {
+    background: rgba(0,0,0,.06);
+    color: var(--text);
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: .8rem;
+    font-weight: 600;
+}
+.brigade-actions {
+    display: flex;
+    gap: .35rem;
+    flex-wrap: wrap;
+}
+.brigade-body {
+    margin-top: .75rem;
+    padding-top: .75rem;
+    border-top: 1px solid var(--border);
+}
+.brigade-members {
+    display: flex;
+    flex-direction: column;
+    gap: .35rem;
+    margin-bottom: .75rem;
+}
+.brigade-member {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .5rem;
+    background: #f7f9fc;
+    padding: .5rem .75rem;
+    border-radius: 6px;
+}
+.brigade-member .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.brigade-member .name small { color: var(--muted); font-size: .78rem; margin-left: .4rem; }
+.brigade-empty {
+    color: var(--muted);
+    font-style: italic;
+    font-size: .9rem;
+    padding: .5rem;
+}
+.brigade-add-row {
+    display: flex;
+    gap: .5rem;
+    align-items: stretch;
+}
+.brigade-add-row select { flex: 1; }
+
+.brigade-add {
+    background: var(--card);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 1rem;
+}
+.brigade-add summary { cursor: pointer; font-weight: 500; }
+.brigade-add[open] summary { margin-bottom: 1rem; }
+
 /* ---- TABLET ---- */
 @media (min-width: 1024px) {
     .topbar-title { font-size: 1.15rem; }

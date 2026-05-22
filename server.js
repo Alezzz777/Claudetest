@@ -6,6 +6,8 @@ const path = require('path');
 const authRoutes = require('./routes/auth');
 const itemRoutes = require('./routes/items');
 const nomenclatureRoutes = require('./routes/nomenclatures');
+const brigadeRoutes = require('./routes/brigades');
+const userRoutes = require('./routes/users');
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -14,6 +16,8 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use('/api/auth', authRoutes);
 app.use('/api/items', itemRoutes);
 app.use('/api/nomenclatures', nomenclatureRoutes);
+app.use('/api/brigades', brigadeRoutes);
+app.use('/api/users', userRoutes);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 

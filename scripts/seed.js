@@ -37,9 +37,13 @@ async function upsertNomenclature(code, name, operations) {
 
 (async () => {
     try {
-        await upsertUser('worker',  'Иван Рабочий',   'worker',  'worker123');
-        await upsertUser('foreman', 'Пётр Бригадир',  'foreman', 'foreman123');
-        await upsertUser('master',  'Сергей Мастер',  'master',  'master123');
+        await upsertUser('worker',  'Иван Рабочий',     'worker',  'worker123');
+        await upsertUser('worker2', 'Алексей Кузнецов', 'worker',  'worker123');
+        await upsertUser('worker3', 'Дмитрий Орлов',    'worker',  'worker123');
+        await upsertUser('worker4', 'Николай Сидоров',  'worker',  'worker123');
+        await upsertUser('foreman', 'Пётр Бригадир',    'foreman', 'foreman123');
+        await upsertUser('foreman2','Олег Лебедев',     'foreman', 'foreman123');
+        await upsertUser('master',  'Сергей Мастер',    'master',  'master123');
 
         await upsertNomenclature('VAL-001', 'Вал ведущий', [
             'Заготовка',

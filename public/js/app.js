@@ -26,7 +26,10 @@
     // Tabs: hide role-restricted tabs
     document.querySelectorAll('.tab').forEach(t => {
         const required = t.dataset.role;
-        if (required && user.role !== required) t.hidden = true;
+        if (required) {
+            const allowed = required.split(/[\s,]+/).filter(Boolean);
+            if (!allowed.includes(user.role)) t.hidden = true;
+        }
         t.addEventListener('click', () => activateTab(t.dataset.tab));
     });
 
@@ -37,6 +40,7 @@
         if (name === 'launch') loadNomenclatureSelect();
         if (name === 'nomenclatures') loadNomenclatures();
         if (name === 'kanban') loadKanban();
+        if (name === 'brigades') loadBrigades();
     }
 
     // ---------- SCAN TAB ----------
@@ -581,6 +585,217 @@
             nomMsg.className = 'error-banner';
             nomMsg.textContent = err.message;
             nomMsg.classList.remove('hidden');
+        }
+    });
+
+    // ---------- BRIGADES TAB ----------
+    const brigadeListEl = document.getElementById('brigade-list');
+    const brigadeForm = document.getElementById('brigade-form');
+    const brigadeFormForeman = document.getElementById('brigade-form-foreman');
+    const brigadeMsg = document.getElementById('brigade-msg');
+    const brigadeAddWrap = document.getElementById('brigade-add-wrap');
+    if (user.role !== 'master') brigadeAddWrap.style.display = 'none';
+
+    const openBrigades = new Set();
+    let workersCache = null;
+
+    async function loadBrigades() {
+        brigadeListEl.innerHTML = '<div class="muted">Загрузка…</div>';
+        try {
+            const [brigades, workers] = await Promise.all([
+                api.get('/api/brigades'),
+                api.get('/api/users?role=worker'),
+            ]);
+            workersCache = workers;
+
+            if (user.role === 'master' && brigadeFormForeman.options.length <= 1) {
+                const foremen = await api.get('/api/users?role=foreman');
+                foremen.forEach(f => {
+                    const opt = document.createElement('option');
+                    opt.value = f.id;
+                    opt.textContent = f.full_name + ' (' + f.username + ')';
+                    brigadeFormForeman.appendChild(opt);
+                });
+            }
+
+            if (!brigades.length) {
+                brigadeListEl.innerHTML = '<div class="muted">Бригады ещё не созданы</div>';
+                return;
+            }
+
+            const cards = await Promise.all(brigades.map(async b => {
+                const isMine = user.role === 'foreman' && b.foreman_id === user.id;
+                const expanded = openBrigades.has(b.id) || isMine;
+                const detail = expanded ? await api.get('/api/brigades/' + b.id) : null;
+                return renderBrigadeCard(b, detail, isMine);
+            }));
+            brigadeListEl.innerHTML = cards.join('');
+            bindBrigadeHandlers();
+        } catch (err) {
+            brigadeListEl.innerHTML = `<div class="error-banner">${escapeHtml(err.message)}</div>`;
+        }
+    }
+
+    function canManageBrigade(b) {
+        if (user.role === 'master') return true;
+        if (user.role === 'foreman' && b.foreman_id === user.id) return true;
+        return false;
+    }
+
+    function renderBrigadeCard(b, detail, isMine) {
+        const canManage = canManageBrigade(b);
+        const isOpen = openBrigades.has(b.id) || isMine;
+
+        const memberIds = new Set((detail?.members || []).map(m => m.id));
+        const available = (workersCache || []).filter(w => !memberIds.has(w.id));
+
+        const memberRows = detail ? (detail.members.length ?
+            detail.members.map(m => `
+                <div class="brigade-member">
+                    <span class="name">${escapeHtml(m.full_name)} <small>${escapeHtml(m.username)}</small></span>
+                    ${canManage ? `<button class="btn small danger" data-remove="${m.id}" data-brigade="${b.id}">Исключить</button>` : ''}
+                </div>`).join('') :
+            '<div class="brigade-empty">Состав бригады пуст</div>'
+        ) : '';
+
+        const addRow = (canManage && detail) ? `
+            <div class="brigade-add-row">
+                <select data-add-select="${b.id}">
+                    <option value="">— выберите рабочего —</option>
+                    ${available.map(w => `<option value="${w.id}">${escapeHtml(w.full_name)} (${escapeHtml(w.username)})</option>`).join('')}
+                </select>
+                <button class="btn primary small" data-add-btn="${b.id}" ${available.length ? '' : 'disabled'}>Добавить</button>
+            </div>
+            ${available.length === 0 ? '<div class="muted" style="font-size:.85rem;margin-top:.5rem">Свободных рабочих нет — все уже состоят в бригадах.</div>' : ''}
+        ` : '';
+
+        const masterActions = user.role === 'master' ? `
+            <div class="brigade-actions">
+                <button class="btn small" data-rename="${b.id}">Переименовать</button>
+                <button class="btn small" data-foreman="${b.id}">Сменить бригадира</button>
+                <button class="btn small danger" data-delete="${b.id}">Удалить</button>
+            </div>
+        ` : '';
+
+        const foremanLabel = b.foreman_name
+            ? `<span class="brigade-foreman">👷 ${escapeHtml(b.foreman_name)}</span>`
+            : `<span class="brigade-foreman" style="background:#fff3cd;color:#664d03">бригадир не назначен</span>`;
+
+        return `
+            <div class="brigade-card ${isMine ? 'is-mine' : ''}" data-card="${b.id}">
+                <div class="brigade-head">
+                    <div>
+                        <h3>${escapeHtml(b.name)}</h3>
+                        <div class="meta">${foremanLabel}<span class="brigade-count">${b.member_count} чел.</span></div>
+                    </div>
+                    <button class="btn small" data-toggle="${b.id}">${isOpen ? 'Свернуть' : 'Состав'}</button>
+                </div>
+                ${isOpen ? `
+                    <div class="brigade-body">
+                        <div class="brigade-members">${memberRows}</div>
+                        ${addRow}
+                        ${masterActions}
+                    </div>` : ''}
+            </div>`;
+    }
+
+    function bindBrigadeHandlers() {
+        brigadeListEl.querySelectorAll('[data-toggle]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const id = +btn.dataset.toggle;
+                if (openBrigades.has(id)) openBrigades.delete(id);
+                else openBrigades.add(id);
+                loadBrigades();
+            });
+        });
+        brigadeListEl.querySelectorAll('[data-add-btn]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const bId = btn.dataset.addBtn;
+                const sel = brigadeListEl.querySelector(`[data-add-select="${bId}"]`);
+                const userId = sel.value;
+                if (!userId) return;
+                try {
+                    await api.post(`/api/brigades/${bId}/members`, { user_id: +userId });
+                    openBrigades.add(+bId);
+                    loadBrigades();
+                } catch (err) { alert(err.message); }
+            });
+        });
+        brigadeListEl.querySelectorAll('[data-remove]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                if (!confirm('Исключить рабочего из бригады?')) return;
+                const bId = btn.dataset.brigade;
+                const uId = btn.dataset.remove;
+                try {
+                    await api.del(`/api/brigades/${bId}/members/${uId}`);
+                    openBrigades.add(+bId);
+                    loadBrigades();
+                } catch (err) { alert(err.message); }
+            });
+        });
+        brigadeListEl.querySelectorAll('[data-rename]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const bId = btn.dataset.rename;
+                const card = brigadeListEl.querySelector(`[data-card="${bId}"] h3`);
+                const cur = card ? card.textContent : '';
+                const name = prompt('Новое название бригады:', cur);
+                if (!name || !name.trim()) return;
+                try {
+                    await patchBrigade(bId, { name: name.trim() });
+                    loadBrigades();
+                } catch (err) { alert(err.message); }
+            });
+        });
+        brigadeListEl.querySelectorAll('[data-foreman]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const bId = btn.dataset.foreman;
+                try {
+                    const foremen = await api.get('/api/users?role=foreman');
+                    const choices = foremen.map((f, i) => `${i + 1}. ${f.full_name} (${f.username})`).join('\n');
+                    const sel = prompt(`Выберите бригадира (номер) или 0 — снять:\n${choices}\n0. — снять —`, '');
+                    if (sel === null) return;
+                    const n = parseInt(sel, 10);
+                    if (isNaN(n) || n < 0 || n > foremen.length) return alert('Некорректный выбор');
+                    const foreman_id = n === 0 ? null : foremen[n - 1].id;
+                    await patchBrigade(bId, { foreman_id });
+                    loadBrigades();
+                } catch (err) { alert(err.message); }
+            });
+        });
+        brigadeListEl.querySelectorAll('[data-delete]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const bId = btn.dataset.delete;
+                if (!confirm('Удалить бригаду? Состав будет очищен.')) return;
+                try {
+                    await api.del(`/api/brigades/${bId}`);
+                    openBrigades.delete(+bId);
+                    loadBrigades();
+                } catch (err) { alert(err.message); }
+            });
+        });
+    }
+
+    async function patchBrigade(id, body) {
+        await api.patch(`/api/brigades/${id}`, body);
+    }
+
+    brigadeForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        brigadeMsg.classList.add('hidden');
+        const data = Object.fromEntries(new FormData(brigadeForm).entries());
+        const payload = {
+            name: data.name,
+            foreman_id: data.foreman_id ? +data.foreman_id : null,
+        };
+        try {
+            await api.post('/api/brigades', payload);
+            brigadeForm.reset();
+            brigadeAddWrap.open = false;
+            loadBrigades();
+        } catch (err) {
+            brigadeMsg.className = 'error-banner';
+            brigadeMsg.textContent = err.message;
+            brigadeMsg.classList.remove('hidden');
         }
     });
 

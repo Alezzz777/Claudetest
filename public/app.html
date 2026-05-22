@@ -22,6 +22,7 @@
         <button class="tab" data-tab="kanban">Канбан</button>
         <button class="tab" data-tab="list">Изделия</button>
         <button class="tab" data-tab="launch" data-role="master">Запуск</button>
+        <button class="tab" data-tab="brigades" data-role="foreman master">Бригады</button>
         <button class="tab" data-tab="nomenclatures">Номенклатуры</button>
     </nav>
 
@@ -114,6 +115,26 @@
                     <button id="lr-new" class="btn primary">+ Новое изделие</button>
                 </div>
             </div>
+        </section>
+
+        <!-- BRIGADES TAB -->
+        <section class="tab-panel" data-panel="brigades">
+            <div id="brigade-list" class="brigade-list"></div>
+            <details id="brigade-add-wrap" class="brigade-add">
+                <summary>+ Создать бригаду</summary>
+                <form id="brigade-form" class="card-form">
+                    <label>Название
+                        <input type="text" name="name" required maxlength="128">
+                    </label>
+                    <label>Бригадир
+                        <select name="foreman_id" id="brigade-form-foreman">
+                            <option value="">— не назначен —</option>
+                        </select>
+                    </label>
+                    <button type="submit" class="btn primary">Создать</button>
+                    <div id="brigade-msg" class="error-banner hidden"></div>
+                </form>
+            </details>
         </section>
 
         <!-- NOMENCLATURES TAB -->

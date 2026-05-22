@@ -57,3 +57,18 @@ CREATE TABLE IF NOT EXISTS movements (
 );
 
 CREATE INDEX IF NOT EXISTS idx_movements_item ON movements(item_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS brigades (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(128) NOT NULL,
+    foreman_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS brigade_members (
+    brigade_id INTEGER NOT NULL REFERENCES brigades(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (brigade_id, user_id),
+    UNIQUE (user_id)  -- worker belongs to at most one brigade
+);
