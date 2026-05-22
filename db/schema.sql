@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS users (
     username VARCHAR(64) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     full_name VARCHAR(255) NOT NULL,
-    role VARCHAR(16) NOT NULL CHECK (role IN ('worker', 'foreman', 'master', 'admin')),
+    role VARCHAR(16) NOT NULL CHECK (role IN ('worker', 'foreman', 'master', 'admin', 'technologist')),
     active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -23,8 +23,12 @@ CREATE TABLE IF NOT EXISTS operations (
     nomenclature_id INTEGER NOT NULL REFERENCES nomenclatures(id) ON DELETE CASCADE,
     seq INTEGER NOT NULL,
     name VARCHAR(255) NOT NULL,
+    hours NUMERIC(8,2) NOT NULL DEFAULT 0,
     UNIQUE (nomenclature_id, seq)
 );
+
+-- Add hours to operations on existing databases (idempotent)
+ALTER TABLE operations ADD COLUMN IF NOT EXISTS hours NUMERIC(8,2) NOT NULL DEFAULT 0;
 
 -- status: 'created' (not yet launched), 'in_progress', 'completed', 'scrapped'
 CREATE TABLE IF NOT EXISTS items (
@@ -52,9 +56,13 @@ CREATE TABLE IF NOT EXISTS movements (
     action VARCHAR(32) NOT NULL,
     from_operation_id INTEGER REFERENCES operations(id),
     to_operation_id INTEGER REFERENCES operations(id),
+    brigade_name VARCHAR(128),
     note TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Snapshot brigade name on movements (idempotent)
+ALTER TABLE movements ADD COLUMN IF NOT EXISTS brigade_name VARCHAR(128);
 
 CREATE INDEX IF NOT EXISTS idx_movements_item ON movements(item_id, created_at DESC);
 
@@ -65,10 +73,10 @@ CREATE TABLE IF NOT EXISTS brigades (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Widen role enum to include 'admin' on existing databases (idempotent)
+-- Widen role enum to include 'admin' + 'technologist' (idempotent)
 ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
 ALTER TABLE users ADD CONSTRAINT users_role_check
-    CHECK (role IN ('worker', 'foreman', 'master', 'admin'));
+    CHECK (role IN ('worker', 'foreman', 'master', 'admin', 'technologist'));
 
 CREATE TABLE IF NOT EXISTS brigade_members (
     brigade_id INTEGER NOT NULL REFERENCES brigades(id) ON DELETE CASCADE,
@@ -77,3 +85,20 @@ CREATE TABLE IF NOT EXISTS brigade_members (
     PRIMARY KEY (brigade_id, user_id),
     UNIQUE (user_id)  -- worker belongs to at most one brigade
 );
+
+-- Labor registry: one row per operation completed by a worker.
+CREATE TABLE IF NOT EXISTS labor_log (
+    id SERIAL PRIMARY KEY,
+    item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    operation_id INTEGER REFERENCES operations(id) ON DELETE SET NULL,
+    operation_name VARCHAR(255),
+    nomenclature_id INTEGER REFERENCES nomenclatures(id) ON DELETE SET NULL,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    brigade_id INTEGER REFERENCES brigades(id) ON DELETE SET NULL,
+    brigade_name VARCHAR(128),
+    hours NUMERIC(8,2) NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_labor_user ON labor_log(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_labor_brigade ON labor_log(brigade_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_labor_created ON labor_log(created_at DESC);

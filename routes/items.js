@@ -34,7 +34,7 @@ async function loadItem(client, key) {
 
 async function getOperations(client, nomId) {
     const { rows } = await client.query(
-        `SELECT id, seq, name FROM operations WHERE nomenclature_id = $1 ORDER BY seq`,
+        `SELECT id, seq, name, hours FROM operations WHERE nomenclature_id = $1 ORDER BY seq`,
         [nomId]
     );
     return rows;
@@ -243,6 +243,16 @@ router.post('/:key/action', async (req, res) => {
             scrapReason = null;
         }
 
+        // Snapshot brigade of the actor (denormalized so history survives renames/deletes)
+        const { rows: brigRows } = await client.query(
+            `SELECT b.id, b.name FROM brigades b
+             JOIN brigade_members bm ON bm.brigade_id = b.id
+             WHERE bm.user_id = $1
+             LIMIT 1`,
+            [req.user.id]
+        );
+        const brigade = brigRows[0] || null;
+
         await client.query(
             `UPDATE items
              SET current_operation_id = $1, status = $2, scrap_reason = $3, updated_at = NOW()
@@ -250,10 +260,30 @@ router.post('/:key/action', async (req, res) => {
             [newOpId, newStatus, scrapReason, item.id]
         );
         await client.query(
-            `INSERT INTO movements (item_id, user_id, action, from_operation_id, to_operation_id, note)
-             VALUES ($1,$2,$3,$4,$5,$6)`,
-            [item.id, req.user.id, resolvedAction, fromOpId, newOpId, note || null]
+            `INSERT INTO movements
+                (item_id, user_id, action, from_operation_id, to_operation_id, brigade_name, note)
+             VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+            [item.id, req.user.id, resolvedAction, fromOpId, newOpId,
+             brigade ? brigade.name : null, note || null]
         );
+
+        // Labor registry: record completed work whenever an operation is closed
+        // by advancing or completing the item.
+        if (resolvedAction === 'advance' || resolvedAction === 'complete') {
+            const completedOp = ops.find(o => o.id === fromOpId);
+            if (completedOp) {
+                await client.query(
+                    `INSERT INTO labor_log
+                        (item_id, operation_id, operation_name, nomenclature_id,
+                         user_id, brigade_id, brigade_name, hours)
+                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+                    [item.id, completedOp.id, completedOp.name, item.nomenclature_id,
+                     req.user.id, brigade ? brigade.id : null,
+                     brigade ? brigade.name : null, completedOp.hours || 0]
+                );
+            }
+        }
+
         await client.query('COMMIT');
 
         const fresh = await loadItem(client, item.id);

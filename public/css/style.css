@@ -677,6 +677,170 @@ input:focus, select:focus, textarea:focus {
     margin-top: .5rem;
 }
 
+/* ---- HEALTH PAGE ---- */
+.health-body {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+}
+.health-card {
+    background: var(--card);
+    padding: 1.75rem 1.5rem;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    width: 100%;
+    max-width: 440px;
+}
+.health-card h1 { margin: 0 0 1rem; font-size: 1.3rem; }
+.status-summary {
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+    padding: .75rem 1rem;
+    border-radius: 8px;
+    margin-bottom: 1rem;
+    font-weight: 600;
+}
+.status-dot {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--muted);
+}
+.status-summary.ok { background: #d1e7dd; color: #0a3622; }
+.status-summary.ok .status-dot { background: var(--success); }
+.status-summary.err { background: #f8d7da; color: #58151c; }
+.status-summary.err .status-dot { background: var(--danger); }
+.status-summary.checking { background: #f0f3f7; color: var(--muted); }
+.status-summary.checking .status-dot { background: var(--muted); animation: pulse 1.2s infinite; }
+@keyframes pulse {
+    0%, 100% { opacity: .4; }
+    50% { opacity: 1; }
+}
+.health-actions {
+    display: flex;
+    gap: .5rem;
+    margin-top: 1rem;
+}
+.health-actions .btn { flex: 1; text-align: center; text-decoration: none; }
+
+/* ---- ROLE 'TECHNOLOGIST' COLOUR ---- */
+.role-technologist { background: #e2d4f0; color: #432874; }
+
+/* ---- LABOR ---- */
+.labor-summary {
+    background: var(--card);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 1rem;
+    margin-bottom: 1rem;
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: .5rem;
+}
+.labor-summary .big { font-size: 1.4rem; font-weight: 700; color: var(--primary); }
+.labor-filters {
+    display: grid;
+    gap: .5rem;
+    grid-template-columns: 1fr;
+    margin-bottom: 1rem;
+}
+@media (min-width: 600px) {
+    .labor-filters { grid-template-columns: repeat(2, 1fr); }
+}
+.labor-list { display: flex; flex-direction: column; gap: .4rem; }
+.labor-row {
+    background: var(--card);
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+    padding: .65rem .85rem;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: .25rem .75rem;
+}
+.labor-row .item-line { font-weight: 500; }
+.labor-row .op-line { color: var(--muted); font-size: .88rem; }
+.labor-row .hours-cell {
+    font-weight: 700;
+    color: var(--primary);
+    font-size: 1rem;
+    align-self: center;
+    text-align: right;
+    min-width: 70px;
+}
+.labor-row .meta-line {
+    grid-column: 1 / -1;
+    font-size: .78rem;
+    color: var(--muted);
+    display: flex;
+    gap: .75rem;
+    flex-wrap: wrap;
+}
+.labor-row .brigade-tag {
+    background: #e7f3fe;
+    color: #084298;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: .72rem;
+}
+
+/* ---- OPS FORM ROWS ---- */
+.op-rows { display: flex; flex-direction: column; gap: .4rem; }
+.op-row {
+    display: grid;
+    grid-template-columns: 1fr 80px auto;
+    gap: .4rem;
+    align-items: center;
+}
+.op-row .op-hours { text-align: right; }
+.op-row .seq-num {
+    color: var(--muted);
+    font-size: .85rem;
+    width: 1.5rem;
+    text-align: right;
+}
+.op-row.has-seq { grid-template-columns: 1.5rem 1fr 80px auto; }
+
+/* operation list with hours inside nomenclatures tab */
+.nom-card .op-list {
+    display: flex;
+    flex-direction: column;
+    gap: .25rem;
+    margin: .5rem 0 0;
+}
+.nom-card .op-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: .5rem;
+    padding: .35rem .5rem;
+    border-radius: 4px;
+}
+.nom-card .op-item:nth-child(odd) { background: #f7f9fc; }
+.nom-card .op-item .seq { color: var(--muted); font-size: .8rem; min-width: 1.5rem; }
+.nom-card .op-item .nm { flex: 1; }
+.nom-card .op-item .h {
+    background: var(--primary);
+    color: #fff;
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: .75rem;
+    font-weight: 600;
+    min-width: 50px;
+    text-align: center;
+}
+.nom-card .totals {
+    margin-top: .5rem;
+    font-size: .85rem;
+    color: var(--muted);
+    text-align: right;
+}
+.nom-card .totals b { color: var(--primary); }
+
 /* ---- TABLET ---- */
 @media (min-width: 1024px) {
     .topbar-title { font-size: 1.15rem; }

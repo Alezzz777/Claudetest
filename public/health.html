@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Состояние · Учёт изделий</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="health-body">
+    <main class="health-card">
+        <h1>Состояние системы</h1>
+        <div id="status-summary" class="status-summary checking">
+            <span class="status-dot"></span>
+            <span class="status-text">Проверка…</span>
+        </div>
+        <dl class="kv">
+            <dt>API</dt><dd id="api-status">—</dd>
+            <dt>База данных</dt><dd id="db-status">—</dd>
+            <dt>Задержка БД</dt><dd id="db-latency">—</dd>
+            <dt>Время сервера</dt><dd id="server-time">—</dd>
+            <dt>Аптайм</dt><dd id="uptime">—</dd>
+            <dt>Последняя проверка</dt><dd id="last-check">—</dd>
+        </dl>
+        <p class="muted">Автообновление каждые 5 секунд.</p>
+        <div class="health-actions">
+            <a href="/" class="btn">К приложению</a>
+            <button id="refresh-now" class="btn primary">Проверить сейчас</button>
+        </div>
+    </main>
+    <script src="/js/health.js"></script>
+</body>
+</html>

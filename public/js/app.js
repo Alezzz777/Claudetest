@@ -7,6 +7,7 @@
         foreman: 'Бригадир',
         master: 'Мастер',
         admin: 'Администратор',
+        technologist: 'Технолог',
     };
     const STATUS_LABELS = {
         created: 'Создано',
@@ -57,6 +58,7 @@
         if (name === 'kanban') loadKanban();
         if (name === 'brigades') loadBrigades();
         if (name === 'users') loadUsers();
+        if (name === 'labor') loadLabor();
     }
 
     // ---------- SCAN TAB ----------
@@ -176,7 +178,7 @@
                                 ${h.to_op_name ? ` → «${escapeHtml(h.to_op_name)}»` : ''}
                             </div>
                             ${h.note ? `<div>${escapeHtml(h.note)}</div>` : ''}
-                            <div class="who">${escapeHtml(h.user_name)} (${ROLE_LABELS[h.user_role] || h.user_role})</div>
+                            <div class="who">${escapeHtml(h.user_name)} (${ROLE_LABELS[h.user_role] || h.user_role})${h.brigade_name ? ' · <span class="brigade-tag">' + escapeHtml(h.brigade_name) + '</span>' : ''}</div>
                             <div class="ts">${formatDate(h.created_at)}</div>
                         </div>
                     `).join('')}
@@ -556,7 +558,24 @@
     const nomForm = document.getElementById('nom-form');
     const nomMsg = document.getElementById('nom-msg');
     const nomAddWrap = document.getElementById('nom-add-wrap');
-    if (user.role !== 'master') nomAddWrap.style.display = 'none';
+    const opsRows = document.getElementById('ops-rows');
+    const addOpRowBtn = document.getElementById('add-op-row');
+    const canEditNom = user.role === 'technologist';
+    if (!canEditNom) nomAddWrap.style.display = 'none';
+
+    function addOpRow(name = '', hours = '') {
+        const row = document.createElement('div');
+        row.className = 'op-row';
+        row.innerHTML = `
+            <input class="op-name" placeholder="Название операции" required>
+            <input class="op-hours" type="number" step="0.01" min="0" inputmode="decimal" placeholder="ч" required>
+            <button type="button" class="btn small danger op-remove" title="Удалить">✕</button>`;
+        row.querySelector('.op-name').value = name;
+        row.querySelector('.op-hours').value = hours;
+        row.querySelector('.op-remove').onclick = () => row.remove();
+        opsRows.appendChild(row);
+    }
+    if (addOpRowBtn) addOpRowBtn.addEventListener('click', () => addOpRow());
 
     async function loadNomenclatures() {
         nomListEl.innerHTML = '<div class="muted">Загрузка…</div>';
@@ -566,43 +585,89 @@
                 nomListEl.innerHTML = '<div class="muted">Номенклатуры ещё не созданы</div>';
                 return;
             }
-            nomListEl.innerHTML = noms.map(n => `
-                <div class="nom-card">
-                    <h3>${escapeHtml(n.name)}</h3>
-                    <div class="code">${escapeHtml(n.code)}</div>
-                    ${n.description ? `<div class="muted" style="margin-top:.25rem">${escapeHtml(n.description)}</div>` : ''}
-                    <ol>${n.operations.map(o => `<li>${escapeHtml(o.name)}</li>`).join('')}</ol>
-                </div>
-            `).join('');
+            nomListEl.innerHTML = noms.map(n => {
+                const opsHtml = n.operations.map(o => `
+                    <div class="op-item" data-op-id="${o.id}">
+                        <span class="seq">${o.seq}.</span>
+                        <span class="nm">${escapeHtml(o.name)}</span>
+                        <span class="h" ${canEditNom ? 'role="button" title="Изменить трудоёмкость" style="cursor:pointer"' : ''}>${formatHours(o.hours)} ч</span>
+                    </div>`).join('');
+                return `
+                    <div class="nom-card" data-nom-id="${n.id}">
+                        <h3>${escapeHtml(n.name)}</h3>
+                        <div class="code">${escapeHtml(n.code)}</div>
+                        ${n.description ? `<div class="muted" style="margin-top:.25rem">${escapeHtml(n.description)}</div>` : ''}
+                        <div class="op-list">${opsHtml}</div>
+                        <div class="totals">Σ норма: <b>${formatHours(n.total_hours)} ч</b></div>
+                    </div>`;
+            }).join('');
+
+            if (canEditNom) {
+                nomListEl.querySelectorAll('.op-item .h').forEach(el => {
+                    el.addEventListener('click', async () => {
+                        const opId = el.closest('.op-item').dataset.opId;
+                        const cur = el.textContent.replace(/[^\d.]/g, '');
+                        const v = prompt('Новая трудоёмкость (часы):', cur);
+                        if (v === null) return;
+                        const h = parseFloat(v);
+                        if (!isFinite(h) || h < 0) return alert('Введите неотрицательное число');
+                        try {
+                            await api.patch('/api/operations/' + opId, { hours: h });
+                            loadNomenclatures();
+                        } catch (err) { alert(err.message); }
+                    });
+                });
+            }
         } catch (err) {
             nomListEl.innerHTML = `<div class="error-banner">${escapeHtml(err.message)}</div>`;
         }
     }
 
-    nomForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        nomMsg.classList.add('hidden');
-        const fd = new FormData(nomForm);
-        const operations = fd.get('operations').split('\n').map(s => s.trim()).filter(Boolean);
-        const payload = {
-            code: fd.get('code').trim(),
-            name: fd.get('name').trim(),
-            description: fd.get('description').trim() || null,
-            operations,
-        };
-        try {
-            await api.post('/api/nomenclatures', payload);
-            nomMsg.className = 'error-banner success';
-            nomMsg.textContent = 'Номенклатура создана';
-            nomMsg.classList.remove('hidden');
-            nomForm.reset();
-            loadNomenclatures();
-        } catch (err) {
-            nomMsg.className = 'error-banner';
-            nomMsg.textContent = err.message;
-            nomMsg.classList.remove('hidden');
-        }
-    });
+    if (canEditNom) {
+        // start with one empty row in the form
+        addOpRow();
+
+        nomForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            nomMsg.classList.add('hidden');
+            const ops = [...opsRows.querySelectorAll('.op-row')].map(r => ({
+                name: r.querySelector('.op-name').value.trim(),
+                hours: parseFloat(r.querySelector('.op-hours').value) || 0,
+            })).filter(o => o.name);
+            if (ops.length === 0) {
+                nomMsg.className = 'error-banner';
+                nomMsg.textContent = 'Добавьте хотя бы одну операцию';
+                nomMsg.classList.remove('hidden');
+                return;
+            }
+            const fd = new FormData(nomForm);
+            const payload = {
+                code: fd.get('code').trim(),
+                name: fd.get('name').trim(),
+                description: (fd.get('description') || '').trim() || null,
+                operations: ops,
+            };
+            try {
+                await api.post('/api/nomenclatures', payload);
+                nomMsg.className = 'error-banner success';
+                nomMsg.textContent = 'Номенклатура создана';
+                nomMsg.classList.remove('hidden');
+                nomForm.reset();
+                opsRows.innerHTML = '';
+                addOpRow();
+                loadNomenclatures();
+            } catch (err) {
+                nomMsg.className = 'error-banner';
+                nomMsg.textContent = err.message;
+                nomMsg.classList.remove('hidden');
+            }
+        });
+    }
+
+    function formatHours(h) {
+        const n = Number(h) || 0;
+        return n.toFixed(2).replace(/\.?0+$/, '');
+    }
 
     // ---------- BRIGADES TAB ----------
     const brigadeListEl = document.getElementById('brigade-list');
@@ -920,6 +985,50 @@
             userMsg.classList.remove('hidden');
         }
     });
+
+    // ---------- LABOR TAB ----------
+    const laborListEl = document.getElementById('labor-list');
+    const laborTotal = document.getElementById('labor-total');
+    const laborCount = document.getElementById('labor-count');
+    const laborFrom = document.getElementById('labor-from');
+    const laborTo = document.getElementById('labor-to');
+
+    let laborDebounce = null;
+    [laborFrom, laborTo].forEach(el => el.addEventListener('change', () => {
+        clearTimeout(laborDebounce);
+        laborDebounce = setTimeout(loadLabor, 200);
+    }));
+
+    async function loadLabor() {
+        laborListEl.innerHTML = '<div class="muted">Загрузка…</div>';
+        const params = new URLSearchParams();
+        if (laborFrom.value) params.set('from', laborFrom.value + 'T00:00:00');
+        if (laborTo.value) params.set('to', laborTo.value + 'T23:59:59');
+        try {
+            const data = await api.get('/api/labor?' + params.toString());
+            laborTotal.textContent = formatHours(data.total_hours);
+            laborCount.textContent = data.count;
+            if (!data.entries.length) {
+                laborListEl.innerHTML = '<div class="muted">Нет записей о выполненных операциях</div>';
+                return;
+            }
+            laborListEl.innerHTML = data.entries.map(e => `
+                <div class="labor-row">
+                    <div>
+                        <div class="item-line">${escapeHtml(e.nom_name || '—')} № ${escapeHtml(e.serial_number || '—')}</div>
+                        <div class="op-line">${escapeHtml(e.operation_name || '—')}</div>
+                    </div>
+                    <div class="hours-cell">${formatHours(e.hours)} ч</div>
+                    <div class="meta-line">
+                        <span>${escapeHtml(e.user_name)}</span>
+                        ${e.brigade_name ? `<span class="brigade-tag">${escapeHtml(e.brigade_name)}</span>` : ''}
+                        <span>${formatDate(e.created_at)}</span>
+                    </div>
+                </div>`).join('');
+        } catch (err) {
+            laborListEl.innerHTML = `<div class="error-banner">${escapeHtml(err.message)}</div>`;
+        }
+    }
 
     // ---------- HELPERS ----------
     function escapeHtml(s) {

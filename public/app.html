@@ -23,7 +23,8 @@
         <button class="tab" data-tab="list" data-role="worker foreman master">Изделия</button>
         <button class="tab" data-tab="launch" data-role="master">Запуск</button>
         <button class="tab" data-tab="brigades" data-role="foreman master">Бригады</button>
-        <button class="tab" data-tab="nomenclatures" data-role="worker foreman master">Номенклатуры</button>
+        <button class="tab" data-tab="nomenclatures" data-role="worker foreman master technologist">Номенклатуры</button>
+        <button class="tab" data-tab="labor" data-role="worker foreman master technologist">Трудозатраты</button>
         <button class="tab" data-tab="users" data-role="admin">Пользователи</button>
     </nav>
 
@@ -160,6 +161,7 @@
                             <option value="worker">Рабочий</option>
                             <option value="foreman">Бригадир</option>
                             <option value="master">Мастер</option>
+                            <option value="technologist">Технолог</option>
                             <option value="admin">Администратор</option>
                         </select>
                     </label>
@@ -187,13 +189,40 @@
                     <label>Описание
                         <textarea name="description" rows="2"></textarea>
                     </label>
-                    <label>Операции (по одной в строке, по порядку)
-                        <textarea name="operations" rows="6" required></textarea>
-                    </label>
+                    <div>
+                        <div class="muted" style="font-size:.85rem;margin-bottom:.35rem">
+                            Операции (по порядку): название и трудоёмкость в часах
+                        </div>
+                        <div id="ops-rows" class="op-rows"></div>
+                        <button type="button" id="add-op-row" class="btn small" style="margin-top:.5rem">+ Добавить операцию</button>
+                    </div>
                     <button type="submit" class="btn primary">Создать</button>
                     <div id="nom-msg" class="error-banner hidden"></div>
                 </form>
             </details>
+        </section>
+
+        <!-- LABOR TAB -->
+        <section class="tab-panel" data-panel="labor">
+            <div class="labor-summary">
+                <div>
+                    <div class="muted">Всего часов в выборке</div>
+                    <div id="labor-total" class="big">—</div>
+                </div>
+                <div>
+                    <div class="muted">Записей</div>
+                    <div id="labor-count" class="big">—</div>
+                </div>
+            </div>
+            <div class="labor-filters">
+                <label>С даты
+                    <input type="date" id="labor-from">
+                </label>
+                <label>По дату
+                    <input type="date" id="labor-to">
+                </label>
+            </div>
+            <div id="labor-list" class="labor-list"></div>
         </section>
     </main>
 
