@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#0d6efd">
+    <title>Цех — учёт изделий</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <header class="topbar">
+        <div class="topbar-title">Учёт изделий</div>
+        <div class="topbar-user">
+            <span id="user-name"></span>
+            <span id="user-role" class="role-badge"></span>
+            <button id="logout-btn" class="btn ghost small">Выход</button>
+        </div>
+    </header>
+
+    <nav class="tabs" role="tablist">
+        <button class="tab active" data-tab="scan">Сканер</button>
+        <button class="tab" data-tab="list">Изделия</button>
+        <button class="tab" data-tab="launch" data-role="master">Запуск</button>
+        <button class="tab" data-tab="nomenclatures">Номенклатуры</button>
+    </nav>
+
+    <main class="content">
+        <!-- SCAN TAB -->
+        <section class="tab-panel active" data-panel="scan">
+            <div class="scan-controls">
+                <button id="scan-start" class="btn primary big">📷 Сканировать штрих-код</button>
+                <div class="manual-row">
+                    <input id="manual-barcode" type="text" placeholder="или введите штрих-код вручную"
+                           inputmode="text" autocomplete="off">
+                    <button id="manual-lookup" class="btn">Найти</button>
+                </div>
+                <div id="scan-error" class="error-banner hidden"></div>
+            </div>
+
+            <div id="scanner-container" class="scanner-container hidden">
+                <video id="scanner-video" playsinline></video>
+                <div class="scanner-overlay">
+                    <div class="scanner-frame"></div>
+                </div>
+                <button id="scan-stop" class="btn ghost scanner-stop">Закрыть</button>
+            </div>
+
+            <div id="item-card" class="item-card hidden"></div>
+        </section>
+
+        <!-- LIST TAB -->
+        <section class="tab-panel" data-panel="list">
+            <div class="filter-row">
+                <input id="list-search" type="text" placeholder="Поиск по штрих-коду или № изделия" inputmode="text">
+                <select id="list-status">
+                    <option value="">Все статусы</option>
+                    <option value="in_progress">В работе</option>
+                    <option value="completed">Завершено</option>
+                    <option value="scrapped">Брак</option>
+                </select>
+                <select id="list-nomenclature">
+                    <option value="">Все номенклатуры</option>
+                </select>
+            </div>
+            <div id="item-list" class="item-list"></div>
+        </section>
+
+        <!-- LAUNCH TAB (master only) -->
+        <section class="tab-panel" data-panel="launch">
+            <h2>Запуск изделия в производство</h2>
+            <form id="launch-form" class="card-form">
+                <label>Номенклатура
+                    <select name="nomenclature_id" required></select>
+                </label>
+                <label>Серийный / заводской номер
+                    <input type="text" name="serial_number" required>
+                </label>
+                <label>Штрих-код
+                    <div class="input-with-action">
+                        <input type="text" name="barcode" id="launch-barcode" required>
+                        <button type="button" id="launch-scan-btn" class="btn small">📷</button>
+                    </div>
+                </label>
+                <button type="submit" class="btn primary big">Запустить</button>
+                <div id="launch-msg" class="error-banner hidden"></div>
+            </form>
+        </section>
+
+        <!-- NOMENCLATURES TAB -->
+        <section class="tab-panel" data-panel="nomenclatures">
+            <div id="nom-list" class="nom-list"></div>
+            <details id="nom-add-wrap" class="nom-add">
+                <summary>+ Добавить номенклатуру</summary>
+                <form id="nom-form" class="card-form">
+                    <label>Код
+                        <input type="text" name="code" required>
+                    </label>
+                    <label>Название
+                        <input type="text" name="name" required>
+                    </label>
+                    <label>Описание
+                        <textarea name="description" rows="2"></textarea>
+                    </label>
+                    <label>Операции (по одной в строке, по порядку)
+                        <textarea name="operations" rows="6" required></textarea>
+                    </label>
+                    <button type="submit" class="btn primary">Создать</button>
+                    <div id="nom-msg" class="error-banner hidden"></div>
+                </form>
+            </details>
+        </section>
+    </main>
+
+    <!-- ZXing browser bundle for barcode scanning -->
+    <script src="https://unpkg.com/@zxing/browser@0.1.5/umd/zxing-browser.min.js"></script>
+    <script src="/js/api.js"></script>
+    <script src="/js/scanner.js"></script>
+    <script src="/js/app.js"></script>
+</body>
+</html>

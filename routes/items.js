@@ -1,0 +1,219 @@
+const express = require('express');
+const db = require('../db');
+const { authenticate, requireRole } = require('../middleware/auth');
+
+const router = express.Router();
+router.use(authenticate);
+
+// Fetch full item info by id or barcode
+async function loadItem(client, key) {
+    const isNumeric = /^\d+$/.test(String(key));
+    const q = `
+        SELECT i.*, n.code AS nom_code, n.name AS nom_name,
+               op.seq AS current_seq, op.name AS current_op_name
+        FROM items i
+        JOIN nomenclatures n ON n.id = i.nomenclature_id
+        LEFT JOIN operations op ON op.id = i.current_operation_id
+        WHERE ${isNumeric ? 'i.id = $1 OR i.barcode = $1::text' : 'i.barcode = $1'}
+        LIMIT 1`;
+    const { rows } = await client.query(q, [String(key)]);
+    return rows[0] || null;
+}
+
+async function getOperations(client, nomId) {
+    const { rows } = await client.query(
+        `SELECT id, seq, name FROM operations WHERE nomenclature_id = $1 ORDER BY seq`,
+        [nomId]
+    );
+    return rows;
+}
+
+async function loadHistory(client, itemId) {
+    const { rows } = await client.query(
+        `SELECT m.*, u.full_name AS user_name, u.role AS user_role,
+                fo.name AS from_op_name, fo.seq AS from_op_seq,
+                to_.name AS to_op_name, to_.seq AS to_op_seq
+         FROM movements m
+         JOIN users u ON u.id = m.user_id
+         LEFT JOIN operations fo ON fo.id = m.from_operation_id
+         LEFT JOIN operations to_ ON to_.id = m.to_operation_id
+         WHERE m.item_id = $1
+         ORDER BY m.created_at DESC`,
+        [itemId]
+    );
+    return rows;
+}
+
+// List items with filters
+router.get('/', async (req, res) => {
+    const { status, nomenclature_id, q } = req.query;
+    const params = [];
+    const where = [];
+    if (status) { params.push(status); where.push(`i.status = $${params.length}`); }
+    if (nomenclature_id) { params.push(nomenclature_id); where.push(`i.nomenclature_id = $${params.length}`); }
+    if (q) {
+        params.push(`%${q}%`);
+        where.push(`(i.barcode ILIKE $${params.length} OR i.serial_number ILIKE $${params.length})`);
+    }
+    const sql = `
+        SELECT i.id, i.serial_number, i.barcode, i.status,
+               n.code AS nom_code, n.name AS nom_name,
+               op.seq AS current_seq, op.name AS current_op_name,
+               i.updated_at
+        FROM items i
+        JOIN nomenclatures n ON n.id = i.nomenclature_id
+        LEFT JOIN operations op ON op.id = i.current_operation_id
+        ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+        ORDER BY i.updated_at DESC
+        LIMIT 200`;
+    const { rows } = await db.query(sql, params);
+    res.json(rows);
+});
+
+// Lookup single item by barcode or id (with full history & next operation)
+router.get('/lookup/:key', async (req, res) => {
+    const client = await db.getClient();
+    try {
+        const item = await loadItem(client, req.params.key);
+        if (!item) return res.status(404).json({ error: 'Изделие не найдено' });
+        const ops = await getOperations(client, item.nomenclature_id);
+        const history = await loadHistory(client, item.id);
+        res.json({ item, operations: ops, history });
+    } finally {
+        client.release();
+    }
+});
+
+// Launch a new item into production (master only)
+router.post('/', requireRole('master'), async (req, res) => {
+    const { nomenclature_id, serial_number, barcode } = req.body || {};
+    if (!nomenclature_id || !serial_number || !barcode) {
+        return res.status(400).json({ error: 'Заполните номенклатуру, серийный номер и штрих-код' });
+    }
+    const client = await db.getClient();
+    try {
+        await client.query('BEGIN');
+        const ops = await getOperations(client, nomenclature_id);
+        if (ops.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'У номенклатуры нет операций' });
+        }
+        const firstOp = ops[0];
+        const { rows } = await client.query(
+            `INSERT INTO items (nomenclature_id, serial_number, barcode, current_operation_id, status)
+             VALUES ($1,$2,$3,$4,'in_progress')
+             RETURNING id`,
+            [nomenclature_id, serial_number, barcode, firstOp.id]
+        );
+        const itemId = rows[0].id;
+        await client.query(
+            `INSERT INTO movements (item_id, user_id, action, to_operation_id, note)
+             VALUES ($1,$2,'launch',$3,$4)`,
+            [itemId, req.user.id, firstOp.id, 'Запуск в производство']
+        );
+        await client.query('COMMIT');
+        res.json({ id: itemId });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        if (err.code === '23505') {
+            return res.status(409).json({ error: 'Штрих-код или серийный номер уже существует' });
+        }
+        res.status(500).json({ error: err.message });
+    } finally {
+        client.release();
+    }
+});
+
+// Movement action: advance | rollback | scrap | return_from_scrap | complete
+router.post('/:key/action', async (req, res) => {
+    const { action, note } = req.body || {};
+    const role = req.user.role;
+
+    const permissions = {
+        advance:           ['worker', 'foreman', 'master'],
+        rollback:          ['foreman', 'master'],
+        scrap:             ['foreman', 'master'],
+        return_from_scrap: ['master'],
+    };
+    if (!permissions[action]) {
+        return res.status(400).json({ error: 'Неизвестное действие' });
+    }
+    if (!permissions[action].includes(role)) {
+        return res.status(403).json({ error: 'Недостаточно прав для этого действия' });
+    }
+
+    const client = await db.getClient();
+    try {
+        await client.query('BEGIN');
+        const item = await loadItem(client, req.params.key);
+        if (!item) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: 'Изделие не найдено' });
+        }
+        const ops = await getOperations(client, item.nomenclature_id);
+        const curIdx = ops.findIndex(o => o.id === item.current_operation_id);
+
+        let newOpId = item.current_operation_id;
+        let newStatus = item.status;
+        let scrapReason = item.scrap_reason;
+        let resolvedAction = action;
+        const fromOpId = item.current_operation_id;
+
+        if (action === 'advance') {
+            if (item.status === 'scrapped') throw httpError(409, 'Изделие в браке — продвижение невозможно');
+            if (item.status === 'completed') throw httpError(409, 'Изделие уже завершено');
+            if (curIdx === -1) throw httpError(409, 'Изделие не запущено в производство');
+            if (curIdx >= ops.length - 1) {
+                newStatus = 'completed';
+                resolvedAction = 'complete';
+            } else {
+                newOpId = ops[curIdx + 1].id;
+                newStatus = 'in_progress';
+            }
+        } else if (action === 'rollback') {
+            if (item.status === 'scrapped') throw httpError(409, 'Изделие в браке — откат невозможен');
+            if (curIdx <= 0) throw httpError(409, 'Откат с первой операции невозможен');
+            newOpId = ops[curIdx - 1].id;
+            newStatus = 'in_progress';
+        } else if (action === 'scrap') {
+            if (item.status === 'scrapped') throw httpError(409, 'Изделие уже в браке');
+            newStatus = 'scrapped';
+            scrapReason = note || 'Без указания причины';
+        } else if (action === 'return_from_scrap') {
+            if (item.status !== 'scrapped') throw httpError(409, 'Изделие не в браке');
+            newStatus = 'in_progress';
+            scrapReason = null;
+        }
+
+        await client.query(
+            `UPDATE items
+             SET current_operation_id = $1, status = $2, scrap_reason = $3, updated_at = NOW()
+             WHERE id = $4`,
+            [newOpId, newStatus, scrapReason, item.id]
+        );
+        await client.query(
+            `INSERT INTO movements (item_id, user_id, action, from_operation_id, to_operation_id, note)
+             VALUES ($1,$2,$3,$4,$5,$6)`,
+            [item.id, req.user.id, resolvedAction, fromOpId, newOpId, note || null]
+        );
+        await client.query('COMMIT');
+
+        const fresh = await loadItem(client, item.id);
+        const history = await loadHistory(client, item.id);
+        res.json({ item: fresh, operations: ops, history });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+        res.status(500).json({ error: err.message });
+    } finally {
+        client.release();
+    }
+});
+
+function httpError(code, msg) {
+    const e = new Error(msg);
+    e.statusCode = code;
+    return e;
+}
+
+module.exports = router;
