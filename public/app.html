@@ -88,13 +88,14 @@
                 <label>Серийный / заводской номер
                     <input type="text" name="serial_number" required>
                 </label>
-                <label>Штрих-код (необязательно)
+                <label>Штрих-код EAN-13 (необязательно)
                     <div class="input-with-action">
                         <input type="text" name="barcode" id="launch-barcode"
-                               placeholder="оставьте пустым — сгенерируется EAN-13"
-                               inputmode="numeric" pattern="\d{13}">
+                               placeholder="оставьте пустым — сгенерируется"
+                               inputmode="numeric" maxlength="13" autocomplete="off">
                         <button type="button" id="launch-scan-btn" class="btn small">📷</button>
                     </div>
+                    <div id="launch-barcode-hint" class="field-hint"></div>
                 </label>
                 <button type="submit" class="btn primary big">Запустить</button>
                 <div id="launch-msg" class="error-banner hidden"></div>

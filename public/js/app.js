@@ -408,12 +408,55 @@
         }
     }
 
+    const launchBarcodeInput = document.getElementById('launch-barcode');
+    const launchBarcodeHint = document.getElementById('launch-barcode-hint');
+
     document.getElementById('launch-scan-btn').addEventListener('click', () => {
         openScanner((code) => {
             closeScanner();
-            document.getElementById('launch-barcode').value = code;
+            launchBarcodeInput.value = code;
+            updateBarcodeHint();
         });
     });
+
+    // Live EAN-13 validation hint
+    launchBarcodeInput.addEventListener('input', () => {
+        // strip anything that isn't a digit
+        const cleaned = launchBarcodeInput.value.replace(/\D/g, '').slice(0, 13);
+        if (cleaned !== launchBarcodeInput.value) launchBarcodeInput.value = cleaned;
+        updateBarcodeHint();
+    });
+
+    function updateBarcodeHint() {
+        const v = launchBarcodeInput.value;
+        if (!v) {
+            launchBarcodeHint.className = 'field-hint';
+            launchBarcodeHint.textContent = 'Будет сгенерирован автоматически';
+            return;
+        }
+        if (v.length < 13) {
+            launchBarcodeHint.className = 'field-hint err';
+            launchBarcodeHint.textContent = `Введено ${v.length} из 13 цифр`;
+            return;
+        }
+        if (isValidEAN13(v)) {
+            launchBarcodeHint.className = 'field-hint ok';
+            launchBarcodeHint.textContent = '✓ Корректный EAN-13';
+        } else {
+            launchBarcodeHint.className = 'field-hint err';
+            launchBarcodeHint.textContent = '✗ Неверная контрольная цифра EAN-13';
+        }
+    }
+
+    function isValidEAN13(code) {
+        if (!/^\d{13}$/.test(code)) return false;
+        let sum = 0;
+        for (let i = 0; i < 12; i++) {
+            const d = +code[i];
+            sum += (i % 2 === 0) ? d : d * 3;
+        }
+        return ((10 - sum % 10) % 10) === +code[12];
+    }
 
     const launchResult = document.getElementById('launch-result');
     const lrSerial = document.getElementById('lr-serial');
@@ -440,10 +483,23 @@
         e.preventDefault();
         launchMsg.classList.add('hidden');
         const data = Object.fromEntries(new FormData(launchForm).entries());
-        if (!data.barcode) delete data.barcode; // let server auto-generate
+
+        if (data.barcode) {
+            if (!isValidEAN13(data.barcode)) {
+                launchMsg.className = 'error-banner';
+                launchMsg.textContent = 'Штрих-код должен быть корректным EAN-13 (13 цифр с правильной контрольной цифрой). Очистите поле для автогенерации.';
+                launchMsg.classList.remove('hidden');
+                launchBarcodeInput.focus();
+                return;
+            }
+        } else {
+            delete data.barcode; // let server auto-generate
+        }
+
         try {
             const res = await api.post('/api/items', data);
             launchForm.reset();
+            updateBarcodeHint();
             launchForm.classList.add('hidden');
             lrSerial.textContent = res.serial_number;
             lrBarcode.textContent = res.barcode + (res.auto_generated ? ' (сгенерирован)' : '');
@@ -456,6 +512,8 @@
             launchMsg.classList.remove('hidden');
         }
     });
+
+    updateBarcodeHint();
 
     function renderBarcode(svg, code) {
         while (svg.firstChild) svg.removeChild(svg.firstChild);

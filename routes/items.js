@@ -93,6 +93,11 @@ function ean13Checksum(twelve) {
     return String((10 - (sum % 10)) % 10);
 }
 
+function isValidEAN13(code) {
+    if (!/^\d{13}$/.test(code)) return false;
+    return ean13Checksum(code.slice(0, 12)) === code[12];
+}
+
 // Prefix '200' = EAN-13 internal/in-store range, safe for private use
 function generateEAN13() {
     let twelve = '200';
@@ -104,8 +109,12 @@ function generateEAN13() {
 router.post('/', requireRole('master'), async (req, res) => {
     const { nomenclature_id, serial_number } = req.body || {};
     let { barcode } = req.body || {};
+    if (typeof barcode === 'string') barcode = barcode.trim();
     if (!nomenclature_id || !serial_number) {
         return res.status(400).json({ error: 'Заполните номенклатуру и серийный номер' });
+    }
+    if (barcode && !isValidEAN13(barcode)) {
+        return res.status(400).json({ error: 'Штрих-код должен быть корректным EAN-13 (13 цифр с правильной контрольной цифрой)' });
     }
     const autoBarcode = !barcode;
     const client = await db.getClient();

@@ -495,6 +495,15 @@ input:focus, select:focus, textarea:focus {
     }
 }
 
+.field-hint {
+    font-size: .8rem;
+    color: var(--muted);
+    margin-top: .25rem;
+    min-height: 1em;
+}
+.field-hint.ok { color: var(--success); }
+.field-hint.err { color: var(--danger); }
+
 /* ---- LAUNCH RESULT ---- */
 .launch-result {
     background: var(--card);
