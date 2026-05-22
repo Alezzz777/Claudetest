@@ -19,6 +19,7 @@
 
     <nav class="tabs" role="tablist">
         <button class="tab active" data-tab="scan">Сканер</button>
+        <button class="tab" data-tab="kanban">Канбан</button>
         <button class="tab" data-tab="list">Изделия</button>
         <button class="tab" data-tab="launch" data-role="master">Запуск</button>
         <button class="tab" data-tab="nomenclatures">Номенклатуры</button>
@@ -46,6 +47,18 @@
             </div>
 
             <div id="item-card" class="item-card hidden"></div>
+        </section>
+
+        <!-- KANBAN TAB -->
+        <section class="tab-panel" data-panel="kanban">
+            <div class="kanban-controls">
+                <select id="kanban-nomenclature"></select>
+                <label class="kanban-toggle">
+                    <input type="checkbox" id="kanban-show-scrap"> показывать брак
+                </label>
+                <button id="kanban-refresh" class="btn small">↻ Обновить</button>
+            </div>
+            <div id="kanban-board" class="kanban-board"></div>
         </section>
 
         <!-- LIST TAB -->

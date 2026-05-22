@@ -36,6 +36,7 @@
         if (name === 'list') loadList();
         if (name === 'launch') loadNomenclatureSelect();
         if (name === 'nomenclatures') loadNomenclatures();
+        if (name === 'kanban') loadKanban();
     }
 
     // ---------- SCAN TAB ----------
@@ -247,6 +248,143 @@
         } catch (err) {
             listEl.innerHTML = `<div class="error-banner">${escapeHtml(err.message)}</div>`;
         }
+    }
+
+    // ---------- KANBAN TAB ----------
+    const kanbanBoard = document.getElementById('kanban-board');
+    const kanbanNom = document.getElementById('kanban-nomenclature');
+    const kanbanShowScrap = document.getElementById('kanban-show-scrap');
+    const kanbanRefresh = document.getElementById('kanban-refresh');
+
+    let kanbanNomsLoaded = false;
+
+    kanbanNom.addEventListener('change', () => {
+        localStorage.setItem('kanbanNom', kanbanNom.value);
+        renderKanban();
+    });
+    kanbanShowScrap.addEventListener('change', () => {
+        localStorage.setItem('kanbanShowScrap', kanbanShowScrap.checked ? '1' : '');
+        renderKanban();
+    });
+    kanbanRefresh.addEventListener('click', renderKanban);
+
+    async function loadKanban() {
+        if (!kanbanNomsLoaded) {
+            kanbanBoard.innerHTML = '<div class="kanban-placeholder">Загрузка номенклатур…</div>';
+            try {
+                const noms = await api.get('/api/nomenclatures');
+                kanbanNom.innerHTML = '';
+                if (!noms.length) {
+                    kanbanBoard.innerHTML = '<div class="kanban-placeholder">Сначала создайте номенклатуру</div>';
+                    return;
+                }
+                noms.forEach(n => {
+                    const opt = document.createElement('option');
+                    opt.value = n.id;
+                    opt.textContent = `${n.code} · ${n.name}`;
+                    opt._operations = n.operations;
+                    kanbanNom.appendChild(opt);
+                });
+                const saved = localStorage.getItem('kanbanNom');
+                if (saved && [...kanbanNom.options].some(o => o.value === saved)) {
+                    kanbanNom.value = saved;
+                }
+                kanbanShowScrap.checked = localStorage.getItem('kanbanShowScrap') === '1';
+                kanbanNomsLoaded = true;
+            } catch (err) {
+                kanbanBoard.innerHTML = `<div class="error-banner">${escapeHtml(err.message)}</div>`;
+                return;
+            }
+        }
+        renderKanban();
+    }
+
+    async function renderKanban() {
+        const nomId = kanbanNom.value;
+        if (!nomId) {
+            kanbanBoard.innerHTML = '<div class="kanban-placeholder">Выберите номенклатуру</div>';
+            return;
+        }
+        const selectedOpt = kanbanNom.selectedOptions[0];
+        const operations = selectedOpt._operations || [];
+
+        kanbanBoard.innerHTML = '<div class="kanban-placeholder">Загрузка…</div>';
+        try {
+            const params = new URLSearchParams({ nomenclature_id: nomId });
+            const items = await api.get('/api/items?' + params.toString());
+
+            const byOp = new Map();
+            operations.forEach(o => byOp.set(o.id, []));
+            const scrapItems = [];
+
+            for (const it of items) {
+                if (it.status === 'scrapped') {
+                    scrapItems.push(it);
+                } else if (it.status === 'in_progress' && it.current_seq != null) {
+                    const opId = operations.find(o => o.seq === it.current_seq)?.id;
+                    if (opId && byOp.has(opId)) byOp.get(opId).push(it);
+                }
+            }
+
+            const columns = operations.map(op => {
+                const list = byOp.get(op.id) || [];
+                return `
+                    <div class="kanban-column">
+                        <div class="kanban-column-header">
+                            <span class="seq">${op.seq}</span>
+                            <span class="name" title="${escapeHtml(op.name)}">${escapeHtml(op.name)}</span>
+                            <span class="count">${list.length}</span>
+                        </div>
+                        <div class="kanban-cards">
+                            ${list.length ? list.map(cardHtml).join('') :
+                                '<div class="kanban-empty">пусто</div>'}
+                        </div>
+                    </div>`;
+            }).join('');
+
+            const scrapCol = kanbanShowScrap.checked ? `
+                <div class="kanban-column scrap-col">
+                    <div class="kanban-column-header">
+                        <span class="seq">⨯</span>
+                        <span class="name">Брак</span>
+                        <span class="count">${scrapItems.length}</span>
+                    </div>
+                    <div class="kanban-cards">
+                        ${scrapItems.length ? scrapItems.map(it => cardHtml(it, true)).join('') :
+                            '<div class="kanban-empty">пусто</div>'}
+                    </div>
+                </div>` : '';
+
+            kanbanBoard.innerHTML = columns + scrapCol;
+            kanbanBoard.querySelectorAll('.kanban-card').forEach(el => {
+                el.addEventListener('click', () => {
+                    activateTab('scan');
+                    document.getElementById('manual-barcode').value = el.dataset.barcode || '';
+                    lookupAndShow(el.dataset.id);
+                });
+            });
+        } catch (err) {
+            kanbanBoard.innerHTML = `<div class="error-banner">${escapeHtml(err.message)}</div>`;
+        }
+    }
+
+    function cardHtml(it, scrap = false) {
+        return `
+            <div class="kanban-card ${scrap ? 'scrap' : ''}"
+                 data-id="${it.id}" data-barcode="${escapeHtml(it.barcode)}">
+                <div class="sn">№ ${escapeHtml(it.serial_number)}</div>
+                <div class="bc">${escapeHtml(it.barcode)}</div>
+                <div class="age">${timeAgo(it.updated_at)}</div>
+            </div>`;
+    }
+
+    function timeAgo(iso) {
+        if (!iso) return '';
+        const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+        if (diff < 60) return 'только что';
+        if (diff < 3600) return Math.floor(diff / 60) + ' мин';
+        if (diff < 86400) return Math.floor(diff / 3600) + ' ч';
+        return Math.floor(diff / 86400) + ' дн';
     }
 
     // ---------- LAUNCH TAB ----------
