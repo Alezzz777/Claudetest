@@ -495,6 +495,52 @@ input:focus, select:focus, textarea:focus {
     }
 }
 
+/* ---- LAUNCH RESULT ---- */
+.launch-result {
+    background: var(--card);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 1.25rem;
+    margin-top: 1rem;
+    text-align: center;
+}
+.launch-result h3 {
+    margin: 0 0 1rem;
+    color: var(--success);
+    font-size: 1.1rem;
+}
+.launch-result .kv {
+    text-align: left;
+    margin-bottom: 1rem;
+}
+.barcode-svg {
+    display: block;
+    margin: 0 auto 1rem;
+    max-width: 100%;
+    height: auto;
+    background: #fff;
+}
+.launch-result-actions {
+    display: flex;
+    gap: .5rem;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+.launch-result-actions .btn { flex: 1 1 auto; min-width: 120px; }
+
+@media print {
+    body * { visibility: hidden; }
+    #launch-result, #launch-result * { visibility: visible; }
+    #launch-result {
+        position: absolute;
+        left: 0; top: 0;
+        width: 100%;
+        box-shadow: none;
+        padding: 0;
+    }
+    .launch-result-actions { display: none; }
+}
+
 /* ---- TABLET ---- */
 @media (min-width: 1024px) {
     .topbar-title { font-size: 1.15rem; }

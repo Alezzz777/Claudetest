@@ -84,12 +84,30 @@ router.get('/lookup/:key', async (req, res) => {
     }
 });
 
+function ean13Checksum(twelve) {
+    let sum = 0;
+    for (let i = 0; i < 12; i++) {
+        const d = parseInt(twelve[i], 10);
+        sum += (i % 2 === 0) ? d : d * 3;
+    }
+    return String((10 - (sum % 10)) % 10);
+}
+
+// Prefix '200' = EAN-13 internal/in-store range, safe for private use
+function generateEAN13() {
+    let twelve = '200';
+    for (let i = 0; i < 9; i++) twelve += Math.floor(Math.random() * 10);
+    return twelve + ean13Checksum(twelve);
+}
+
 // Launch a new item into production (master only)
 router.post('/', requireRole('master'), async (req, res) => {
-    const { nomenclature_id, serial_number, barcode } = req.body || {};
-    if (!nomenclature_id || !serial_number || !barcode) {
-        return res.status(400).json({ error: 'Заполните номенклатуру, серийный номер и штрих-код' });
+    const { nomenclature_id, serial_number } = req.body || {};
+    let { barcode } = req.body || {};
+    if (!nomenclature_id || !serial_number) {
+        return res.status(400).json({ error: 'Заполните номенклатуру и серийный номер' });
     }
+    const autoBarcode = !barcode;
     const client = await db.getClient();
     try {
         await client.query('BEGIN');
@@ -99,20 +117,39 @@ router.post('/', requireRole('master'), async (req, res) => {
             return res.status(400).json({ error: 'У номенклатуры нет операций' });
         }
         const firstOp = ops[0];
-        const { rows } = await client.query(
-            `INSERT INTO items (nomenclature_id, serial_number, barcode, current_operation_id, status)
-             VALUES ($1,$2,$3,$4,'in_progress')
-             RETURNING id`,
-            [nomenclature_id, serial_number, barcode, firstOp.id]
-        );
-        const itemId = rows[0].id;
+
+        let itemId = null;
+        for (let attempt = 0; attempt < 5 && itemId === null; attempt++) {
+            const candidate = autoBarcode ? generateEAN13() : barcode;
+            try {
+                const { rows } = await client.query(
+                    `INSERT INTO items (nomenclature_id, serial_number, barcode, current_operation_id, status)
+                     VALUES ($1,$2,$3,$4,'in_progress')
+                     RETURNING id`,
+                    [nomenclature_id, serial_number, candidate, firstOp.id]
+                );
+                itemId = rows[0].id;
+                barcode = candidate;
+            } catch (err) {
+                if (err.code === '23505' && autoBarcode) {
+                    // collision on generated barcode — try again
+                    continue;
+                }
+                throw err;
+            }
+        }
+        if (itemId === null) {
+            await client.query('ROLLBACK');
+            return res.status(500).json({ error: 'Не удалось сгенерировать уникальный штрих-код' });
+        }
+
         await client.query(
             `INSERT INTO movements (item_id, user_id, action, to_operation_id, note)
              VALUES ($1,$2,'launch',$3,$4)`,
             [itemId, req.user.id, firstOp.id, 'Запуск в производство']
         );
         await client.query('COMMIT');
-        res.json({ id: itemId });
+        res.json({ id: itemId, barcode, serial_number, auto_generated: autoBarcode });
     } catch (err) {
         await client.query('ROLLBACK');
         if (err.code === '23505') {

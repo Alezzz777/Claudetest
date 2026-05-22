@@ -415,22 +415,63 @@
         });
     });
 
+    const launchResult = document.getElementById('launch-result');
+    const lrSerial = document.getElementById('lr-serial');
+    const lrBarcode = document.getElementById('lr-barcode');
+    const lrSvg = document.getElementById('lr-barcode-svg');
+
+    document.getElementById('lr-new').addEventListener('click', () => {
+        launchResult.classList.add('hidden');
+        launchForm.classList.remove('hidden');
+        launchForm.querySelector('input[name="serial_number"]').focus();
+    });
+    document.getElementById('lr-print').addEventListener('click', () => window.print());
+    document.getElementById('lr-copy').addEventListener('click', async () => {
+        try {
+            await navigator.clipboard.writeText(lrBarcode.textContent);
+            const btn = document.getElementById('lr-copy');
+            const orig = btn.textContent;
+            btn.textContent = '✓ Скопировано';
+            setTimeout(() => btn.textContent = orig, 1500);
+        } catch {}
+    });
+
     launchForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         launchMsg.classList.add('hidden');
         const data = Object.fromEntries(new FormData(launchForm).entries());
+        if (!data.barcode) delete data.barcode; // let server auto-generate
         try {
             const res = await api.post('/api/items', data);
-            launchMsg.className = 'error-banner success';
-            launchMsg.textContent = 'Изделие запущено. ID: ' + res.id;
-            launchMsg.classList.remove('hidden');
             launchForm.reset();
+            launchForm.classList.add('hidden');
+            lrSerial.textContent = res.serial_number;
+            lrBarcode.textContent = res.barcode + (res.auto_generated ? ' (сгенерирован)' : '');
+            renderBarcode(lrSvg, res.barcode);
+            launchResult.classList.remove('hidden');
+            launchResult.scrollIntoView({ behavior: 'smooth' });
         } catch (err) {
             launchMsg.className = 'error-banner';
             launchMsg.textContent = err.message;
             launchMsg.classList.remove('hidden');
         }
     });
+
+    function renderBarcode(svg, code) {
+        while (svg.firstChild) svg.removeChild(svg.firstChild);
+        try {
+            const isEAN13 = /^\d{13}$/.test(code);
+            JsBarcode(svg, code, {
+                format: isEAN13 ? 'EAN13' : 'CODE128',
+                displayValue: true,
+                fontSize: 16,
+                margin: 8,
+                height: 80,
+            });
+        } catch (err) {
+            console.error('barcode render failed', err);
+        }
+    }
 
     // ---------- NOMENCLATURES TAB ----------
     const nomListEl = document.getElementById('nom-list');
