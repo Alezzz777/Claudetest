@@ -28,4 +28,5 @@ COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 COPY package.json ./
 EXPOSE 3000
-CMD ["sh", "-c", "npx --yes prisma@6 migrate deploy && node server.js"]
+CMD ["sh", "-c", "npx --yes prisma@6 migrate deploy"]
+CMD ["sh", "-c", "npm run dev"]
