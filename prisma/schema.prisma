@@ -1,0 +1,43 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Tie {
+  id          String   @id @default(cuid())
+  name        String
+  brand       String?
+  pattern     String?
+  colors      String[] @default([])
+  material    String?
+  widthCm     Float?
+  lengthCm    Float?
+  estPriceMin Int?
+  estPriceMax Int?
+  currency    String   @default("USD")
+  condition   String?
+  notes       String?
+  aiSummary   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  photos      Photo[]
+
+  @@index([brand])
+  @@index([pattern])
+}
+
+model Photo {
+  id        String   @id @default(cuid())
+  tieId     String
+  tie       Tie      @relation(fields: [tieId], references: [id], onDelete: Cascade)
+  mime      String
+  data      Bytes
+  isPrimary Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([tieId])
+}
