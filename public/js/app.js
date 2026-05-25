@@ -7,7 +7,7 @@ let previousView = 'dashboard';
 let currentDetailId = null;
 let pingInterval = null;
 
-const ROLE_LABELS = { sender: 'Отправитель', client: 'Клиент', dispatcher: 'Диспетчер' };
+const ROLE_LABELS = { client: 'Клиент', executor: 'Исполнитель', dispatcher: 'Диспетчер' };
 const STATUS_LABELS = { new: 'Новая', assigned: 'Назначена', in_progress: 'В пути', delivered: 'Доставлена', confirmed: 'Подтверждена', rejected: 'Отклонена' };
 const PRIORITY_LABELS = { low: 'Низкий', normal: 'Обычный', high: 'Высокий', urgent: 'Срочный' };
 
@@ -131,7 +131,7 @@ async function showApp() {
   document.getElementById('app-screen').style.display = 'block';
   document.getElementById('header-user').textContent = `${currentUser.full_name} (${ROLE_LABELS[currentUser.role]})`;
 
-  document.getElementById('nav-new').style.display = ['sender', 'dispatcher'].includes(currentUser.role) ? 'flex' : 'none';
+  document.getElementById('nav-new').style.display = ['client', 'dispatcher'].includes(currentUser.role) ? 'flex' : 'none';
   document.getElementById('nav-locations').style.display = currentUser.role === 'dispatcher' ? 'flex' : 'none';
 
   startPing();
@@ -270,21 +270,31 @@ function navigateToView(view) {
 
 function renderDetail(r) {
   const role = currentUser.role;
+  const userId = currentUser.id;
   let actionsHtml = '';
 
+  // Диспетчер: назначить исполнителя
   if (role === 'dispatcher' && ['new', 'assigned'].includes(r.status)) {
     actionsHtml += `<button class="btn btn-primary btn-sm" onclick="openAssignModal(${r.id})">Назначить</button>`;
   }
-  if (role === 'client' && r.status === 'assigned') {
+
+  // Исполнитель: взять в работу
+  if (role === 'executor' && r.status === 'assigned') {
     actionsHtml += `<button class="btn btn-warning btn-sm" onclick="changeStatus(${r.id},'in_progress')">Взять в работу</button>`;
   }
-  if (role === 'client' && r.status === 'in_progress') {
+
+  // Исполнитель: доставлено
+  if (role === 'executor' && r.status === 'in_progress') {
     actionsHtml += `<button class="btn btn-success btn-sm" onclick="changeStatus(${r.id},'delivered')">Доставлено</button>`;
   }
-  if (role === 'client' && r.status === 'delivered') {
+
+  // Клиент (получатель/отправитель): подтвердить или отклонить доставку
+  if (role === 'client' && r.status === 'delivered' && (r.receiver_id === userId || r.sender_id === userId)) {
     actionsHtml += `<button class="btn btn-success btn-sm" onclick="changeStatus(${r.id},'confirmed')">Подтвердить</button>`;
     actionsHtml += `<button class="btn btn-danger btn-sm" onclick="openRejectModal(${r.id})">Отклонить</button>`;
   }
+
+  // Диспетчер: отклонить
   if (role === 'dispatcher' && ['new', 'assigned', 'delivered'].includes(r.status)) {
     actionsHtml += `<button class="btn btn-danger btn-sm" onclick="openRejectModal(${r.id})">Отклонить</button>`;
   }
@@ -322,8 +332,9 @@ function renderDetail(r) {
 
     <div class="detail-section">
       <h3>Участники</h3>
-      <div class="detail-row"><span class="detail-label">Отправитель</span><span class="detail-value">${r.sender_name || '—'}${r.sender_phone ? '<br>' + r.sender_phone : ''}</span></div>
-      <div class="detail-row"><span class="detail-label">Клиент</span><span class="detail-value">${r.client_name || '—'}${r.client_phone ? '<br>' + r.client_phone : ''}</span></div>
+      <div class="detail-row"><span class="detail-label">Заказчик</span><span class="detail-value">${r.sender_name || '—'}${r.sender_phone ? '<br>' + r.sender_phone : ''}</span></div>
+      <div class="detail-row"><span class="detail-label">Получатель</span><span class="detail-value">${r.receiver_name || '—'}${r.receiver_phone ? '<br>' + r.receiver_phone : ''}</span></div>
+      <div class="detail-row"><span class="detail-label">Исполнитель</span><span class="detail-value">${r.executor_name || '—'}${r.executor_phone ? '<br>' + r.executor_phone : ''}</span></div>
       <div class="detail-row"><span class="detail-label">Диспетчер</span><span class="detail-value">${r.dispatcher_name || '—'}</span></div>
     </div>
 
@@ -352,9 +363,17 @@ async function changeStatus(id, status) {
 async function openAssignModal(id) {
   currentDetailId = id;
   try {
-    const clients = await api('/users/by-role/client');
-    const select = document.getElementById('assign-client');
-    select.innerHTML = clients.map(c => `<option value="${c.id}">${c.full_name}</option>`).join('');
+    const [executors, clients] = await Promise.all([
+      api('/users/by-role/executor'),
+      api('/users/by-role/client')
+    ]);
+
+    const execSelect = document.getElementById('assign-executor');
+    execSelect.innerHTML = executors.map(e => `<option value="${e.id}">${e.full_name}</option>`).join('');
+
+    const recSelect = document.getElementById('assign-receiver');
+    recSelect.innerHTML = '<option value="">Не менять</option>' + clients.map(c => `<option value="${c.id}">${c.full_name}</option>`).join('');
+
     document.getElementById('assign-modal').classList.add('active');
   } catch (err) {
     showToast(err.message, 'error');
@@ -364,7 +383,10 @@ async function openAssignModal(id) {
 document.getElementById('assign-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   try {
-    const body = { client_id: parseInt(document.getElementById('assign-client').value) };
+    const body = { executor_id: parseInt(document.getElementById('assign-executor').value) };
+    const recId = document.getElementById('assign-receiver').value;
+    if (recId) body.receiver_id = parseInt(recId);
+
     await api(`/requests/${currentDetailId}/assign`, { method: 'PATCH', body: JSON.stringify(body) });
     closeModal('assign-modal');
     showToast('Исполнитель назначен');
@@ -408,8 +430,8 @@ async function loadNewRequestForm() {
       api('/locations')
     ]);
 
-    const clientSelect = document.getElementById('nr-client');
-    clientSelect.innerHTML = '<option value="">Не указан</option>' + clients.map(c => `<option value="${c.id}">${c.full_name}</option>`).join('');
+    const receiverSelect = document.getElementById('nr-receiver');
+    receiverSelect.innerHTML = '<option value="">Не указан</option>' + clients.map(c => `<option value="${c.id}">${c.full_name}</option>`).join('');
 
     const pickupSelect = document.getElementById('nr-pickup');
     const deliverySelect = document.getElementById('nr-delivery');
@@ -430,8 +452,8 @@ document.getElementById('new-request-form').addEventListener('submit', async (e)
       priority: document.getElementById('nr-priority').value,
       notes: document.getElementById('nr-notes').value || null,
     };
-    const clientId = document.getElementById('nr-client').value;
-    if (clientId) body.client_id = parseInt(clientId);
+    const recId = document.getElementById('nr-receiver').value;
+    if (recId) body.receiver_id = parseInt(recId);
 
     const result = await api('/requests', { method: 'POST', body: JSON.stringify(body) });
     showToast('Заявка #' + result.id + ' создана');

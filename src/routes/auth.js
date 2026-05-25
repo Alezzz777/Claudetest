@@ -37,7 +37,7 @@ router.post('/register', async (req, res) => {
     return res.status(400).json({ error: 'Заполните все обязательные поля' });
   }
 
-  const validRoles = ['sender', 'client', 'dispatcher'];
+  const validRoles = ['client', 'executor', 'dispatcher'];
   if (!validRoles.includes(role)) {
     return res.status(400).json({ error: 'Недопустимая роль' });
   }

@@ -10,7 +10,7 @@ async function initDB() {
         username VARCHAR(50) UNIQUE NOT NULL,
         password_hash VARCHAR(255) NOT NULL,
         full_name VARCHAR(100) NOT NULL,
-        role VARCHAR(20) NOT NULL CHECK (role IN ('sender', 'client', 'dispatcher')),
+        role VARCHAR(20) NOT NULL CHECK (role IN ('client', 'executor', 'dispatcher')),
         phone VARCHAR(20),
         created_at TIMESTAMP DEFAULT NOW()
       );
@@ -26,7 +26,8 @@ async function initDB() {
       CREATE TABLE IF NOT EXISTS transport_requests (
         id SERIAL PRIMARY KEY,
         sender_id INTEGER NOT NULL REFERENCES users(id),
-        client_id INTEGER REFERENCES users(id),
+        receiver_id INTEGER REFERENCES users(id),
+        executor_id INTEGER REFERENCES users(id),
         dispatcher_id INTEGER REFERENCES users(id),
         cargo_description TEXT NOT NULL,
         weight DECIMAL(10,2),
@@ -50,7 +51,8 @@ async function initDB() {
 
       CREATE INDEX IF NOT EXISTS idx_requests_status ON transport_requests(status);
       CREATE INDEX IF NOT EXISTS idx_requests_sender ON transport_requests(sender_id);
-      CREATE INDEX IF NOT EXISTS idx_requests_client ON transport_requests(client_id);
+      CREATE INDEX IF NOT EXISTS idx_requests_receiver ON transport_requests(receiver_id);
+      CREATE INDEX IF NOT EXISTS idx_requests_executor ON transport_requests(executor_id);
       CREATE INDEX IF NOT EXISTS idx_history_request ON status_history(request_id);
     `);
 
@@ -60,10 +62,10 @@ async function initDB() {
       await client.query(`
         INSERT INTO users (username, password_hash, full_name, role, phone) VALUES
         ('dispatcher1', $1, 'Иванов Иван Иванович', 'dispatcher', '+7-900-111-1111'),
-        ('sender1', $1, 'Петров Петр Петрович', 'sender', '+7-900-222-2222'),
-        ('client1', $1, 'Сидоров Сидор Сидорович', 'client', '+7-900-333-3333'),
-        ('client2', $1, 'Козлов Алексей Михайлович', 'client', '+7-900-444-4444'),
-        ('client3', $1, 'Волков Дмитрий Сергеевич', 'client', '+7-900-555-5555')
+        ('client1', $1, 'Петров Петр Петрович', 'client', '+7-900-222-2222'),
+        ('client2', $1, 'Сидоров Сидор Сидорович', 'client', '+7-900-333-3333'),
+        ('executor1', $1, 'Козлов Алексей Михайлович', 'executor', '+7-900-444-4444'),
+        ('executor2', $1, 'Волков Дмитрий Сергеевич', 'executor', '+7-900-555-5555')
       `, [hash]);
 
       const dispatcherRow = await client.query("SELECT id FROM users WHERE username = 'dispatcher1'");

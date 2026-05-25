@@ -15,11 +15,12 @@ router.get('/', async (req, res) => {
   const params = [];
   let paramIdx = 1;
 
-  if (role === 'sender') {
-    where = `WHERE r.sender_id = $${paramIdx++}`;
+  if (role === 'client') {
+    where = `WHERE (r.sender_id = $${paramIdx} OR r.receiver_id = $${paramIdx})`;
+    paramIdx++;
     params.push(id);
-  } else if (role === 'client') {
-    where = `WHERE r.client_id = $${paramIdx++}`;
+  } else if (role === 'executor') {
+    where = `WHERE r.executor_id = $${paramIdx++}`;
     params.push(id);
   }
 
@@ -38,11 +39,13 @@ router.get('/', async (req, res) => {
     const result = await pool.query(`
       SELECT r.*,
         s.full_name as sender_name,
-        c.full_name as client_name,
+        rv.full_name as receiver_name,
+        e.full_name as executor_name,
         d.full_name as dispatcher_name
       FROM transport_requests r
       LEFT JOIN users s ON r.sender_id = s.id
-      LEFT JOIN users c ON r.client_id = c.id
+      LEFT JOIN users rv ON r.receiver_id = rv.id
+      LEFT JOIN users e ON r.executor_id = e.id
       LEFT JOIN users d ON r.dispatcher_id = d.id
       ${where}
       ORDER BY
@@ -62,8 +65,13 @@ router.get('/stats', async (req, res) => {
   let filter = '';
   const params = [];
 
-  if (role === 'sender') { filter = 'WHERE sender_id = $1'; params.push(id); }
-  else if (role === 'client') { filter = 'WHERE client_id = $1'; params.push(id); }
+  if (role === 'client') {
+    filter = 'WHERE (sender_id = $1 OR receiver_id = $1)';
+    params.push(id);
+  } else if (role === 'executor') {
+    filter = 'WHERE executor_id = $1';
+    params.push(id);
+  }
 
   try {
     const result = await pool.query(`
@@ -85,11 +93,13 @@ router.get('/:id', async (req, res) => {
     const result = await pool.query(`
       SELECT r.*,
         s.full_name as sender_name, s.phone as sender_phone,
-        c.full_name as client_name, c.phone as client_phone,
+        rv.full_name as receiver_name, rv.phone as receiver_phone,
+        e.full_name as executor_name, e.phone as executor_phone,
         d.full_name as dispatcher_name
       FROM transport_requests r
       LEFT JOIN users s ON r.sender_id = s.id
-      LEFT JOIN users c ON r.client_id = c.id
+      LEFT JOIN users rv ON r.receiver_id = rv.id
+      LEFT JOIN users e ON r.executor_id = e.id
       LEFT JOIN users d ON r.dispatcher_id = d.id
       WHERE r.id = $1
     `, [req.params.id]);
@@ -110,19 +120,22 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-router.post('/', authorize('sender', 'dispatcher'), async (req, res) => {
-  const { cargo_description, weight, pickup_location, delivery_location, client_id, priority, notes } = req.body;
+router.post('/', authorize('client', 'dispatcher'), async (req, res) => {
+  const { cargo_description, weight, pickup_location, delivery_location, receiver_id, priority, notes } = req.body;
 
   if (!cargo_description || !pickup_location || !delivery_location) {
     return res.status(400).json({ error: 'Заполните описание груза, место отправки и доставки' });
   }
 
   try {
+    const senderId = req.user.role === 'client' ? req.user.id : null;
+    const dispatcherId = req.user.role === 'dispatcher' ? req.user.id : null;
+
     const result = await pool.query(`
-      INSERT INTO transport_requests (sender_id, client_id, cargo_description, weight, pickup_location, delivery_location, priority, notes)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      INSERT INTO transport_requests (sender_id, receiver_id, dispatcher_id, cargo_description, weight, pickup_location, delivery_location, priority, notes)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *
-    `, [req.user.id, client_id || null, cargo_description, weight || null, pickup_location, delivery_location, priority || 'normal', notes || null]);
+    `, [senderId || req.user.id, receiver_id || null, dispatcherId, cargo_description, weight || null, pickup_location, delivery_location, priority || 'normal', notes || null]);
 
     const request = result.rows[0];
 
@@ -138,8 +151,8 @@ router.post('/', authorize('sender', 'dispatcher'), async (req, res) => {
 });
 
 router.patch('/:id/assign', authorize('dispatcher'), async (req, res) => {
-  const { client_id } = req.body;
-  if (!client_id) return res.status(400).json({ error: 'Укажите клиента-исполнителя' });
+  const { executor_id, receiver_id } = req.body;
+  if (!executor_id) return res.status(400).json({ error: 'Укажите исполнителя' });
 
   try {
     const check = await pool.query('SELECT * FROM transport_requests WHERE id = $1', [req.params.id]);
@@ -148,9 +161,19 @@ router.patch('/:id/assign', authorize('dispatcher'), async (req, res) => {
       return res.status(400).json({ error: 'Невозможно назначить — заявка уже в работе' });
     }
 
+    const sets = ['executor_id = $1', 'dispatcher_id = $2', "status = 'assigned'", 'updated_at = NOW()'];
+    const params = [executor_id, req.user.id];
+    let paramIdx = 3;
+
+    if (receiver_id) {
+      sets.push(`receiver_id = $${paramIdx++}`);
+      params.push(receiver_id);
+    }
+
+    params.push(req.params.id);
     const result = await pool.query(
-      `UPDATE transport_requests SET client_id = $1, dispatcher_id = $2, status = 'assigned', updated_at = NOW() WHERE id = $3 RETURNING *`,
-      [client_id, req.user.id, req.params.id]
+      `UPDATE transport_requests SET ${sets.join(', ')} WHERE id = $${paramIdx} RETURNING *`,
+      params
     );
 
     await pool.query(
@@ -166,10 +189,11 @@ router.patch('/:id/assign', authorize('dispatcher'), async (req, res) => {
 
 router.patch('/:id/status', async (req, res) => {
   const { status, comment } = req.body;
-  const { role } = req.user;
+  const { role, id: userId } = req.user;
 
   const allowedTransitions = {
-    client: { assigned: 'in_progress', in_progress: 'delivered', delivered: 'confirmed' },
+    executor: { assigned: 'in_progress', in_progress: 'delivered' },
+    client: { delivered: 'confirmed' },
     dispatcher: { new: 'assigned', assigned: 'in_progress', in_progress: 'delivered', delivered: 'confirmed' },
   };
 
@@ -177,11 +201,18 @@ router.patch('/:id/status', async (req, res) => {
     const check = await pool.query('SELECT * FROM transport_requests WHERE id = $1', [req.params.id]);
     if (!check.rows.length) return res.status(404).json({ error: 'Заявка не найдена' });
 
-    const currentStatus = check.rows[0].status;
+    const row = check.rows[0];
+    const currentStatus = row.status;
     const transitions = allowedTransitions[role];
 
     if (!transitions || transitions[currentStatus] !== status) {
       return res.status(400).json({ error: 'Недопустимый переход статуса' });
+    }
+
+    if (role === 'client' && status === 'confirmed') {
+      if (row.receiver_id !== userId && row.sender_id !== userId) {
+        return res.status(403).json({ error: 'Только получатель или отправитель может подтвердить' });
+      }
     }
 
     const result = await pool.query(
@@ -208,8 +239,19 @@ router.patch('/:id/reject', authorize('client', 'dispatcher'), async (req, res) 
     const check = await pool.query('SELECT * FROM transport_requests WHERE id = $1', [req.params.id]);
     if (!check.rows.length) return res.status(404).json({ error: 'Заявка не найдена' });
 
-    if (!['delivered', 'new', 'assigned'].includes(check.rows[0].status)) {
-      return res.status(400).json({ error: 'Невозможно отклонить заявку в текущем статусе' });
+    const row = check.rows[0];
+
+    if (req.user.role === 'client') {
+      if (row.receiver_id !== req.user.id && row.sender_id !== req.user.id) {
+        return res.status(403).json({ error: 'Только получатель или отправитель может отклонить' });
+      }
+      if (row.status !== 'delivered') {
+        return res.status(400).json({ error: 'Клиент может отклонить только доставленную заявку' });
+      }
+    } else {
+      if (!['delivered', 'new', 'assigned'].includes(row.status)) {
+        return res.status(400).json({ error: 'Невозможно отклонить заявку в текущем статусе' });
+      }
     }
 
     const result = await pool.query(

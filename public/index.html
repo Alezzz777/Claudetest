@@ -50,8 +50,8 @@
         <label>Роль</label>
         <select id="reg-role" required>
           <option value="">Выберите роль</option>
-          <option value="sender">Отправитель</option>
-          <option value="client">Клиент (исполнитель/получатель)</option>
+          <option value="client">Клиент (заказчик/получатель)</option>
+          <option value="executor">Исполнитель</option>
           <option value="dispatcher">Диспетчер</option>
         </select>
       </div>
@@ -105,7 +105,7 @@
     <div id="detail-content"></div>
   </div>
 
-  <!-- New Request (sender, dispatcher) -->
+  <!-- New Request (client, dispatcher) -->
   <div id="view-new" class="view">
     <h3 style="font-size:18px;margin-bottom:16px">Новая заявка</h3>
     <form id="new-request-form" class="detail-section">
@@ -126,8 +126,8 @@
         <select id="nr-delivery" required><option value="">Загрузка...</option></select>
       </div>
       <div class="form-group">
-        <label>Клиент (исполнитель)</label>
-        <select id="nr-client"><option value="">Не указан</option></select>
+        <label>Получатель</label>
+        <select id="nr-receiver"><option value="">Не указан</option></select>
       </div>
       <div class="form-group">
         <label>Приоритет</label>
@@ -196,8 +196,12 @@
     <h3>Назначить исполнителя</h3>
     <form id="assign-form">
       <div class="form-group">
-        <label>Клиент-исполнитель *</label>
-        <select id="assign-client" required></select>
+        <label>Исполнитель *</label>
+        <select id="assign-executor" required></select>
+      </div>
+      <div class="form-group">
+        <label>Получатель</label>
+        <select id="assign-receiver"><option value="">Не менять</option></select>
       </div>
       <button type="submit" class="btn btn-primary">Назначить</button>
     </form>

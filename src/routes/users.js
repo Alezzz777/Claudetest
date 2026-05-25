@@ -6,7 +6,7 @@ const router = express.Router();
 router.use(authenticate);
 
 router.get('/by-role/:role', async (req, res) => {
-  const validRoles = ['sender', 'client', 'dispatcher'];
+  const validRoles = ['client', 'executor', 'dispatcher'];
   if (!validRoles.includes(req.params.role)) {
     return res.status(400).json({ error: 'Недопустимая роль' });
   }
