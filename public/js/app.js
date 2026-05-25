@@ -16,7 +16,13 @@ async function api(path, options = {}) {
   const headers = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
   const res = await fetch(API + path, { ...options, headers });
-  const data = await res.json();
+  const text = await res.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error(res.ok ? 'Некорректный ответ сервера' : `Ошибка ${res.status}`);
+  }
   if (!res.ok) throw new Error(data.error || 'Ошибка');
   return data;
 }

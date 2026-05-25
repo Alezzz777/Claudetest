@@ -34,6 +34,10 @@ app.use('/api/requests', requestRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/locations', locationRoutes);
 
+app.all('/api/*', (req, res) => {
+  res.status(404).json({ error: 'Маршрут не найден' });
+});
+
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
