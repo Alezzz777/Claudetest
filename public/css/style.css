@@ -292,7 +292,7 @@ body {
 /* ── Toast ── */
 .toast {
   position: fixed;
-  top: 60px;
+  bottom: 70px;
   left: 16px;
   right: 16px;
   padding: 14px 16px;
@@ -301,9 +301,10 @@ body {
   font-size: 14px;
   font-weight: 500;
   z-index: 200;
-  transform: translateY(-120%);
+  transform: translateY(200%);
   transition: transform .3s ease;
   text-align: center;
+  pointer-events: none;
 }
 .toast.show { transform: translateY(0); }
 .toast-success { background: var(--success); }

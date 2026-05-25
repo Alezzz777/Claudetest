@@ -256,10 +256,17 @@ function renderRequestList(requests, containerId) {
 }
 
 // ── Request Detail ──
-async function openDetail(id) {
-  previousView = document.querySelector('.view.active')?.id.replace('view-', '') || 'requests';
+async function openDetail(id, keepPreviousView) {
+  if (!keepPreviousView) {
+    const activeView = document.querySelector('.view.active')?.id.replace('view-', '');
+    if (activeView && activeView !== 'detail') {
+      previousView = activeView;
+    }
+  }
   currentDetailId = id;
-  navigateToView('detail');
+
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById('view-detail').classList.add('active');
 
   try {
     const r = await api(`/requests/${id}`);
@@ -267,11 +274,6 @@ async function openDetail(id) {
   } catch (err) {
     showToast(err.message, 'error');
   }
-}
-
-function navigateToView(view) {
-  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-  document.getElementById(`view-${view}`).classList.add('active');
 }
 
 function renderDetail(r) {
@@ -359,7 +361,7 @@ async function changeStatus(id, status) {
   try {
     await api(`/requests/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
     showToast('Статус обновлён');
-    openDetail(id);
+    openDetail(id, true);
   } catch (err) {
     showToast(err.message, 'error');
   }
@@ -396,7 +398,7 @@ document.getElementById('assign-form').addEventListener('submit', async (e) => {
     await api(`/requests/${currentDetailId}/assign`, { method: 'PATCH', body: JSON.stringify(body) });
     closeModal('assign-modal');
     showToast('Исполнитель назначен');
-    openDetail(currentDetailId);
+    openDetail(currentDetailId, true);
   } catch (err) {
     showToast(err.message, 'error');
   }
@@ -418,7 +420,7 @@ document.getElementById('reject-form').addEventListener('submit', async (e) => {
     });
     closeModal('reject-modal');
     showToast('Заявка отклонена');
-    openDetail(currentDetailId);
+    openDetail(currentDetailId, true);
   } catch (err) {
     showToast(err.message, 'error');
   }
