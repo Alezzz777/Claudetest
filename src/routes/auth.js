@@ -67,10 +67,32 @@ router.post('/register', async (req, res) => {
 
 router.get('/me', authenticate, async (req, res) => {
   try {
-    const result = await pool.query('SELECT id, username, full_name, role, phone, created_at FROM users WHERE id = $1', [req.user.id]);
+    const result = await pool.query('SELECT id, username, full_name, role, phone, avatar, created_at FROM users WHERE id = $1', [req.user.id]);
     res.json(result.rows[0]);
   } catch {
     res.status(500).json({ error: 'Ошибка сервера' });
+  }
+});
+
+router.put('/avatar', authenticate, async (req, res) => {
+  const { avatar } = req.body;
+  if (!avatar) return res.status(400).json({ error: 'Укажите изображение' });
+  if (avatar.length > 200000) return res.status(400).json({ error: 'Изображение слишком большое (макс 150KB)' });
+
+  try {
+    await pool.query('UPDATE users SET avatar = $1 WHERE id = $2', [avatar, req.user.id]);
+    res.json({ avatar });
+  } catch {
+    res.status(500).json({ error: 'Ошибка сохранения аватарки' });
+  }
+});
+
+router.delete('/avatar', authenticate, async (req, res) => {
+  try {
+    await pool.query('UPDATE users SET avatar = NULL WHERE id = $1', [req.user.id]);
+    res.json({ avatar: null });
+  } catch {
+    res.status(500).json({ error: 'Ошибка удаления аватарки' });
   }
 });
 

@@ -143,6 +143,7 @@ async function showApp() {
 
   document.getElementById('nav-new').style.display = ['client', 'dispatcher'].includes(currentUser.role) ? 'flex' : 'none';
   document.getElementById('nav-locations').style.display = currentUser.role === 'dispatcher' ? 'flex' : 'none';
+  document.getElementById('nav-profile').style.display = currentUser.role === 'executor' ? 'flex' : 'none';
 
   startPing();
   navigateTo('dashboard');
@@ -160,6 +161,7 @@ function navigateTo(view) {
   else if (view === 'requests') { currentPage = 1; loadRequests(); }
   else if (view === 'new') loadNewRequestForm();
   else if (view === 'locations') loadLocations();
+  else if (view === 'profile') loadProfile();
   else if (view === 'leaderboard') loadLeaderboard();
 }
 
@@ -549,6 +551,59 @@ document.getElementById('new-request-form').addEventListener('submit', async (e)
   }
 });
 
+// ── Profile & Avatar ──
+function renderAvatarHtml(avatar, name, cls) {
+  if (avatar) return `<div class="${cls}"><img src="${avatar}" alt=""></div>`;
+  const initials = (name || '?').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
+  return `<div class="${cls}">${initials}</div>`;
+}
+
+function loadProfile() {
+  const el = document.getElementById('profile-avatar');
+  if (currentUser.avatar) {
+    el.innerHTML = `<img src="${currentUser.avatar}" alt="">`;
+    document.getElementById('avatar-remove').style.display = 'inline-flex';
+  } else {
+    const initials = (currentUser.full_name || '?').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
+    el.innerHTML = initials;
+    document.getElementById('avatar-remove').style.display = 'none';
+  }
+  document.getElementById('profile-name').textContent = currentUser.full_name;
+  document.getElementById('profile-role').textContent = ROLE_LABELS[currentUser.role];
+}
+
+document.getElementById('avatar-input').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  if (!file.type.startsWith('image/')) { showToast('Выберите изображение', 'error'); return; }
+  if (file.size > 150 * 1024) { showToast('Макс. размер 150KB', 'error'); return; }
+
+  const reader = new FileReader();
+  reader.onload = async () => {
+    try {
+      const data = await api('/auth/avatar', { method: 'PUT', body: JSON.stringify({ avatar: reader.result }) });
+      currentUser.avatar = data.avatar;
+      loadProfile();
+      showToast('Аватарка обновлена');
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  };
+  reader.readAsDataURL(file);
+  e.target.value = '';
+});
+
+async function removeAvatar() {
+  try {
+    await api('/auth/avatar', { method: 'DELETE' });
+    currentUser.avatar = null;
+    loadProfile();
+    showToast('Аватарка удалена');
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
 // ── Leaderboard ──
 const MONTH_NAMES = ['', 'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
 let currentLeaderboardMonth = '';
@@ -582,9 +637,11 @@ async function loadLeaderboard(month) {
     container.innerHTML = rows.map((e, i) => {
       const rankClass = i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
       const avgRating = e.avg_rating ? renderStars(Math.round(parseFloat(e.avg_rating))) + ` ${e.avg_rating}` : 'Нет оценок';
+      const avatarHtml = renderAvatarHtml(e.avatar, e.full_name, 'avatar-sm');
       return `
         <div class="leaderboard-card">
           <div class="lb-rank ${rankClass}">${i + 1}</div>
+          ${avatarHtml}
           <div class="lb-info">
             <div class="lb-name">${escapeHtml(e.full_name)}</div>
             <div class="lb-meta">Выполнено: ${e.completed} | ${avgRating}</div>

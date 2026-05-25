@@ -9,8 +9,9 @@ const locationRoutes = require('./src/routes/locations');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(express.json());
+app.use(express.json({ limit: '500kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 app.get('/api/health', async (req, res) => {
   const status = { server: 'ok', timestamp: new Date().toISOString() };

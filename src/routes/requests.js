@@ -105,6 +105,7 @@ router.get('/leaderboard', async (req, res) => {
         u.id,
         u.full_name,
         u.username,
+        u.avatar,
         COUNT(r.id) as completed,
         COALESCE(SUM(
           10
@@ -116,7 +117,7 @@ router.get('/leaderboard', async (req, res) => {
       FROM users u
       LEFT JOIN transport_requests r ON r.executor_id = u.id AND r.status = 'confirmed'${dateFilter}
       WHERE u.role = 'executor'
-      GROUP BY u.id, u.full_name, u.username
+      GROUP BY u.id, u.full_name, u.username, u.avatar
       ORDER BY points DESC, completed DESC
     `, params);
 

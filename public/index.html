@@ -155,6 +155,23 @@
     <div id="locations-list"></div>
   </div>
 
+  <!-- Profile (executor) -->
+  <div id="view-profile" class="view">
+    <h3 style="font-size:18px;margin-bottom:16px">Профиль</h3>
+    <div class="detail-section" style="text-align:center">
+      <div id="profile-avatar-wrap" style="margin-bottom:16px">
+        <div id="profile-avatar" class="avatar-large"></div>
+      </div>
+      <div id="profile-name" style="font-size:18px;font-weight:600;margin-bottom:4px"></div>
+      <div id="profile-role" style="font-size:14px;color:var(--gray-500);margin-bottom:16px"></div>
+      <label class="btn btn-outline btn-sm" style="width:auto;display:inline-flex;cursor:pointer">
+        Загрузить фото
+        <input type="file" id="avatar-input" accept="image/*" style="display:none">
+      </label>
+      <button class="btn btn-danger btn-sm" id="avatar-remove" style="width:auto;display:none;margin-left:8px" onclick="removeAvatar()">Удалить</button>
+    </div>
+  </div>
+
   <!-- Leaderboard -->
   <div id="view-leaderboard" class="view">
     <h3 style="font-size:18px;margin-bottom:12px">Рейтинг исполнителей</h3>
@@ -188,6 +205,10 @@
     <button class="nav-item" data-view="locations" id="nav-locations" style="display:none">
       <span class="nav-icon">&#128205;</span>
       Места
+    </button>
+    <button class="nav-item" data-view="profile" id="nav-profile" style="display:none">
+      <span class="nav-icon">&#128100;</span>
+      Профиль
     </button>
     <button class="nav-item" data-view="leaderboard" id="nav-leaderboard">
       <span class="nav-icon">&#127942;</span>

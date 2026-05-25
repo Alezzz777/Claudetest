@@ -12,6 +12,7 @@ async function initDB() {
         full_name VARCHAR(100) NOT NULL,
         role VARCHAR(20) NOT NULL CHECK (role IN ('client', 'executor', 'dispatcher')),
         phone VARCHAR(20),
+        avatar TEXT,
         created_at TIMESTAMP DEFAULT NOW()
       );
 
