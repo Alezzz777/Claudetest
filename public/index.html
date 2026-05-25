@@ -155,6 +155,12 @@
     <div id="locations-list"></div>
   </div>
 
+  <!-- Leaderboard -->
+  <div id="view-leaderboard" class="view">
+    <h3 style="font-size:18px;margin-bottom:16px">Рейтинг исполнителей</h3>
+    <div id="leaderboard-content"></div>
+  </div>
+
   <!-- Health Page -->
   <div id="view-health" class="view">
     <h3 style="font-size:18px;margin-bottom:16px">Состояние системы</h3>
@@ -181,6 +187,10 @@
     <button class="nav-item" data-view="locations" id="nav-locations" style="display:none">
       <span class="nav-icon">&#128205;</span>
       Места
+    </button>
+    <button class="nav-item" data-view="leaderboard" id="nav-leaderboard">
+      <span class="nav-icon">&#127942;</span>
+      Рейтинг
     </button>
     <button class="nav-item" data-view="health">
       <span class="nav-icon">&#9881;</span>
@@ -240,6 +250,25 @@
       </div>
       <button type="submit" class="btn btn-primary">Сохранить</button>
     </form>
+  </div>
+</div>
+
+<!-- ── Rating Modal ── -->
+<div id="rate-modal" class="modal-overlay">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal('rate-modal')">&times;</button>
+    <h3>Оцените доставку</h3>
+    <div style="text-align:center;padding:16px 0">
+      <div class="stars" id="rate-stars">
+        <span class="star" data-val="1">&#9733;</span>
+        <span class="star" data-val="2">&#9733;</span>
+        <span class="star" data-val="3">&#9733;</span>
+        <span class="star" data-val="4">&#9733;</span>
+        <span class="star" data-val="5">&#9733;</span>
+      </div>
+      <p id="rate-label" style="margin-top:12px;font-size:14px;color:var(--gray-500)">Выберите оценку</p>
+    </div>
+    <button class="btn btn-primary" id="rate-submit" disabled>Оценить</button>
   </div>
 </div>
 

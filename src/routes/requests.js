@@ -20,7 +20,8 @@ router.get('/', async (req, res) => {
     paramIdx++;
     params.push(id);
   } else if (role === 'executor') {
-    where = `WHERE r.executor_id = $${paramIdx++}`;
+    where = `WHERE (r.executor_id = $${paramIdx} OR r.status = 'new')`;
+    paramIdx++;
     params.push(id);
   }
 
@@ -69,7 +70,7 @@ router.get('/stats', async (req, res) => {
     filter = 'WHERE (sender_id = $1 OR receiver_id = $1)';
     params.push(id);
   } else if (role === 'executor') {
-    filter = 'WHERE executor_id = $1';
+    filter = 'WHERE (executor_id = $1 OR status = \'new\')';
     params.push(id);
   }
 
@@ -85,6 +86,33 @@ router.get('/stats', async (req, res) => {
     res.json(stats);
   } catch {
     res.status(500).json({ error: 'Ошибка загрузки статистики' });
+  }
+});
+
+router.get('/leaderboard', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        u.id,
+        u.full_name,
+        u.username,
+        COUNT(r.id) as completed,
+        COALESCE(SUM(
+          10
+          + CASE r.priority WHEN 'urgent' THEN 15 WHEN 'high' THEN 10 WHEN 'normal' THEN 5 ELSE 2 END
+          + COALESCE(r.rating * 2, 0)
+        ), 0) as points,
+        ROUND(AVG(r.rating)::numeric, 1) as avg_rating,
+        COUNT(r.rating) as rated_count
+      FROM users u
+      LEFT JOIN transport_requests r ON r.executor_id = u.id AND r.status = 'confirmed'
+      WHERE u.role = 'executor'
+      GROUP BY u.id, u.full_name, u.username
+      ORDER BY points DESC, completed DESC
+    `);
+    res.json(result.rows);
+  } catch {
+    res.status(500).json({ error: 'Ошибка загрузки рейтинга' });
   }
 });
 
@@ -128,14 +156,13 @@ router.post('/', authorize('client', 'dispatcher'), async (req, res) => {
   }
 
   try {
-    const senderId = req.user.role === 'client' ? req.user.id : null;
     const dispatcherId = req.user.role === 'dispatcher' ? req.user.id : null;
 
     const result = await pool.query(`
       INSERT INTO transport_requests (sender_id, receiver_id, dispatcher_id, cargo_description, weight, pickup_location, delivery_location, priority, notes)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *
-    `, [senderId || req.user.id, receiver_id || null, dispatcherId, cargo_description, weight || null, pickup_location, delivery_location, priority || 'normal', notes || null]);
+    `, [req.user.id, receiver_id || null, dispatcherId, cargo_description, weight || null, pickup_location, delivery_location, priority || 'normal', notes || null]);
 
     const request = result.rows[0];
 
@@ -147,6 +174,30 @@ router.post('/', authorize('client', 'dispatcher'), async (req, res) => {
     res.status(201).json(request);
   } catch {
     res.status(500).json({ error: 'Ошибка создания заявки' });
+  }
+});
+
+router.patch('/:id/take', authorize('executor'), async (req, res) => {
+  try {
+    const check = await pool.query('SELECT * FROM transport_requests WHERE id = $1', [req.params.id]);
+    if (!check.rows.length) return res.status(404).json({ error: 'Заявка не найдена' });
+    if (check.rows[0].status !== 'new') {
+      return res.status(400).json({ error: 'Заявка уже взята или назначена' });
+    }
+
+    const result = await pool.query(
+      `UPDATE transport_requests SET executor_id = $1, status = 'in_progress', updated_at = NOW() WHERE id = $2 RETURNING *`,
+      [req.user.id, req.params.id]
+    );
+
+    await pool.query(
+      'INSERT INTO status_history (request_id, status, changed_by, comment) VALUES ($1, $2, $3, $4)',
+      [req.params.id, 'in_progress', req.user.id, 'Исполнитель взял заявку']
+    );
+
+    res.json(result.rows[0]);
+  } catch {
+    res.status(500).json({ error: 'Ошибка взятия заявки' });
   }
 });
 
@@ -228,6 +279,43 @@ router.patch('/:id/status', async (req, res) => {
     res.json(result.rows[0]);
   } catch {
     res.status(500).json({ error: 'Ошибка обновления статуса' });
+  }
+});
+
+router.patch('/:id/rate', authorize('client'), async (req, res) => {
+  const { rating } = req.body;
+  if (!rating || rating < 1 || rating > 5) {
+    return res.status(400).json({ error: 'Оценка должна быть от 1 до 5' });
+  }
+
+  try {
+    const check = await pool.query('SELECT * FROM transport_requests WHERE id = $1', [req.params.id]);
+    if (!check.rows.length) return res.status(404).json({ error: 'Заявка не найдена' });
+
+    const row = check.rows[0];
+    if (row.status !== 'confirmed') {
+      return res.status(400).json({ error: 'Оценить можно только подтверждённую заявку' });
+    }
+    if (row.receiver_id !== req.user.id && row.sender_id !== req.user.id) {
+      return res.status(403).json({ error: 'Только заказчик или получатель может оценить' });
+    }
+    if (row.rating) {
+      return res.status(400).json({ error: 'Заявка уже оценена' });
+    }
+
+    const result = await pool.query(
+      'UPDATE transport_requests SET rating = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
+      [rating, req.params.id]
+    );
+
+    await pool.query(
+      'INSERT INTO status_history (request_id, status, changed_by, comment) VALUES ($1, $2, $3, $4)',
+      [req.params.id, 'confirmed', req.user.id, 'Оценка: ' + rating + ' из 5']
+    );
+
+    res.json(result.rows[0]);
+  } catch {
+    res.status(500).json({ error: 'Ошибка сохранения оценки' });
   }
 });
 

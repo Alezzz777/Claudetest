@@ -6,10 +6,12 @@ let currentPage = 1;
 let previousView = 'dashboard';
 let currentDetailId = null;
 let pingInterval = null;
+let selectedRating = 0;
 
 const ROLE_LABELS = { client: 'Клиент', executor: 'Исполнитель', dispatcher: 'Диспетчер' };
 const STATUS_LABELS = { new: 'Новая', assigned: 'Назначена', in_progress: 'В пути', delivered: 'Доставлена', confirmed: 'Подтверждена', rejected: 'Отклонена' };
 const PRIORITY_LABELS = { low: 'Низкий', normal: 'Обычный', high: 'Высокий', urgent: 'Срочный' };
+const RATING_LABELS = ['', 'Ужасно', 'Плохо', 'Нормально', 'Хорошо', 'Отлично'];
 
 // ── API Helper ──
 async function api(path, options = {}) {
@@ -156,6 +158,7 @@ function navigateTo(view) {
   else if (view === 'requests') { currentPage = 1; loadRequests(); }
   else if (view === 'new') loadNewRequestForm();
   else if (view === 'locations') loadLocations();
+  else if (view === 'leaderboard') loadLeaderboard();
   else if (view === 'health') loadHealth();
 }
 
@@ -276,6 +279,15 @@ async function openDetail(id, keepPreviousView) {
   }
 }
 
+function renderStars(rating) {
+  let html = '<span class="stars-display">';
+  for (let i = 1; i <= 5; i++) {
+    html += `<span class="star ${i <= rating ? 'filled' : ''}">&#9733;</span>`;
+  }
+  html += '</span>';
+  return html;
+}
+
 function renderDetail(r) {
   const role = currentUser.role;
   const userId = currentUser.id;
@@ -286,25 +298,41 @@ function renderDetail(r) {
     actionsHtml += `<button class="btn btn-primary btn-sm" onclick="openAssignModal(${r.id})">Назначить</button>`;
   }
 
+  // Исполнитель: взять новую заявку
+  if (role === 'executor' && r.status === 'new') {
+    actionsHtml += `<button class="btn btn-primary btn-sm" onclick="takeRequest(${r.id})">Взять заявку</button>`;
+  }
+
   // Исполнитель: взять в работу
-  if (role === 'executor' && r.status === 'assigned') {
+  if (role === 'executor' && r.status === 'assigned' && r.executor_id === userId) {
     actionsHtml += `<button class="btn btn-warning btn-sm" onclick="changeStatus(${r.id},'in_progress')">Взять в работу</button>`;
   }
 
   // Исполнитель: доставлено
-  if (role === 'executor' && r.status === 'in_progress') {
+  if (role === 'executor' && r.status === 'in_progress' && r.executor_id === userId) {
     actionsHtml += `<button class="btn btn-success btn-sm" onclick="changeStatus(${r.id},'delivered')">Доставлено</button>`;
   }
 
-  // Клиент (получатель/отправитель): подтвердить или отклонить доставку
+  // Клиент: подтвердить или отклонить доставку
   if (role === 'client' && r.status === 'delivered' && (r.receiver_id === userId || r.sender_id === userId)) {
     actionsHtml += `<button class="btn btn-success btn-sm" onclick="changeStatus(${r.id},'confirmed')">Подтвердить</button>`;
     actionsHtml += `<button class="btn btn-danger btn-sm" onclick="openRejectModal(${r.id})">Отклонить</button>`;
   }
 
+  // Клиент: оценить подтверждённую заявку
+  if (role === 'client' && r.status === 'confirmed' && !r.rating && (r.receiver_id === userId || r.sender_id === userId)) {
+    actionsHtml += `<button class="btn btn-warning btn-sm" onclick="openRateModal(${r.id})">Оценить доставку</button>`;
+  }
+
   // Диспетчер: отклонить
   if (role === 'dispatcher' && ['new', 'assigned', 'delivered'].includes(r.status)) {
     actionsHtml += `<button class="btn btn-danger btn-sm" onclick="openRejectModal(${r.id})">Отклонить</button>`;
+  }
+
+  // Рейтинг
+  let ratingHtml = '';
+  if (r.rating) {
+    ratingHtml = `<div class="detail-row"><span class="detail-label">Оценка</span><span class="detail-value">${renderStars(r.rating)} ${RATING_LABELS[r.rating]}</span></div>`;
   }
 
   const historyHtml = (r.history || []).map(h => `
@@ -330,6 +358,7 @@ function renderDetail(r) {
       <div class="detail-row"><span class="detail-label">Вес</span><span class="detail-value">${r.weight ? r.weight + ' кг' : '—'}</span></div>
       <div class="detail-row"><span class="detail-label">Приоритет</span><span class="detail-value">${PRIORITY_LABELS[r.priority]}</span></div>
       ${r.notes ? `<div class="detail-row"><span class="detail-label">Примечания</span><span class="detail-value">${escapeHtml(r.notes)}</span></div>` : ''}
+      ${ratingHtml}
     </div>
 
     <div class="detail-section">
@@ -354,6 +383,17 @@ function renderDetail(r) {
 
     ${historyHtml ? `<div class="detail-section"><h3>История</h3>${historyHtml}</div>` : ''}
   `;
+}
+
+// ── Take Request (executor self-assign) ──
+async function takeRequest(id) {
+  try {
+    await api(`/requests/${id}/take`, { method: 'PATCH' });
+    showToast('Заявка взята в работу!');
+    openDetail(id, true);
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
 }
 
 // ── Status Change ──
@@ -426,6 +466,42 @@ document.getElementById('reject-form').addEventListener('submit', async (e) => {
   }
 });
 
+// ── Rate Modal ──
+function openRateModal(id) {
+  currentDetailId = id;
+  selectedRating = 0;
+  document.querySelectorAll('#rate-stars .star').forEach(s => s.classList.remove('filled'));
+  document.getElementById('rate-label').textContent = 'Выберите оценку';
+  document.getElementById('rate-submit').disabled = true;
+  document.getElementById('rate-modal').classList.add('active');
+}
+
+document.getElementById('rate-stars').addEventListener('click', (e) => {
+  const star = e.target.closest('.star');
+  if (!star) return;
+  selectedRating = parseInt(star.dataset.val);
+  document.querySelectorAll('#rate-stars .star').forEach(s => {
+    s.classList.toggle('filled', parseInt(s.dataset.val) <= selectedRating);
+  });
+  document.getElementById('rate-label').textContent = RATING_LABELS[selectedRating];
+  document.getElementById('rate-submit').disabled = false;
+});
+
+document.getElementById('rate-submit').addEventListener('click', async () => {
+  if (!selectedRating) return;
+  try {
+    await api(`/requests/${currentDetailId}/rate`, {
+      method: 'PATCH',
+      body: JSON.stringify({ rating: selectedRating })
+    });
+    closeModal('rate-modal');
+    showToast('Спасибо за оценку!');
+    openDetail(currentDetailId, true);
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+});
+
 function closeModal(id) {
   document.getElementById(id).classList.remove('active');
 }
@@ -471,6 +547,38 @@ document.getElementById('new-request-form').addEventListener('submit', async (e)
     showToast(err.message, 'error');
   }
 });
+
+// ── Leaderboard ──
+async function loadLeaderboard() {
+  const container = document.getElementById('leaderboard-content');
+  container.innerHTML = '<div class="loading">Загрузка...</div>';
+  try {
+    const data = await api('/requests/leaderboard');
+    if (!data.length) {
+      container.innerHTML = '<div class="empty-state"><div class="empty-icon">&#127942;</div><p>Пока нет данных</p></div>';
+      return;
+    }
+    container.innerHTML = data.map((e, i) => {
+      const rankClass = i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
+      const avgRating = e.avg_rating ? renderStars(Math.round(parseFloat(e.avg_rating))) + ` ${e.avg_rating}` : 'Нет оценок';
+      return `
+        <div class="leaderboard-card">
+          <div class="lb-rank ${rankClass}">${i + 1}</div>
+          <div class="lb-info">
+            <div class="lb-name">${escapeHtml(e.full_name)}</div>
+            <div class="lb-meta">Выполнено: ${e.completed} | ${avgRating}</div>
+          </div>
+          <div class="lb-points">
+            <div class="lb-points-value">${e.points}</div>
+            <div class="lb-points-label">баллов</div>
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
 
 // ── Locations Management ──
 async function loadLocations() {

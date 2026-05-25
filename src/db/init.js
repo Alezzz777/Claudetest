@@ -35,6 +35,7 @@ async function initDB() {
         delivery_location VARCHAR(255) NOT NULL,
         priority VARCHAR(10) DEFAULT 'normal' CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
         status VARCHAR(20) DEFAULT 'new' CHECK (status IN ('new', 'assigned', 'in_progress', 'delivered', 'confirmed', 'rejected')),
+        rating INTEGER CHECK (rating >= 1 AND rating <= 5),
         notes TEXT,
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
