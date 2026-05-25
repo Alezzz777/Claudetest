@@ -1,22 +1,60 @@
 const webpush = require('web-push');
 const pool = require('./db/pool');
 
-const VAPID_PUBLIC = process.env.VAPID_PUBLIC_KEY || '';
-const VAPID_PRIVATE = process.env.VAPID_PRIVATE_KEY || '';
 const VAPID_EMAIL = process.env.VAPID_EMAIL || 'mailto:admin@cargo-transport.local';
 
 let pushEnabled = false;
-if (VAPID_PUBLIC && VAPID_PRIVATE) {
-  webpush.setVapidDetails(VAPID_EMAIL, VAPID_PUBLIC, VAPID_PRIVATE);
-  pushEnabled = true;
-  console.log('Web Push enabled');
-} else {
-  console.log('Web Push disabled — set VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY env vars');
-  console.log('Generate keys with: npx web-push generate-vapid-keys');
+let vapidPublic = '';
+
+async function init() {
+  let pub = process.env.VAPID_PUBLIC_KEY || '';
+  let priv = process.env.VAPID_PRIVATE_KEY || '';
+
+  if (!pub || !priv) {
+    try {
+      const existing = await pool.query(
+        "SELECT key, value FROM app_settings WHERE key IN ('vapid_public', 'vapid_private')"
+      );
+      const map = {};
+      existing.rows.forEach(r => { map[r.key] = r.value; });
+
+      if (map.vapid_public && map.vapid_private) {
+        pub = map.vapid_public;
+        priv = map.vapid_private;
+        console.log('VAPID keys loaded from database');
+      } else {
+        const keys = webpush.generateVAPIDKeys();
+        pub = keys.publicKey;
+        priv = keys.privateKey;
+        await pool.query(
+          `INSERT INTO app_settings (key, value) VALUES ('vapid_public', $1), ('vapid_private', $2)
+           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+          [pub, priv]
+        );
+        console.log('VAPID keys generated and saved to database');
+      }
+    } catch (err) {
+      console.log('Web Push disabled — database not available for VAPID key storage:', err.message);
+      return;
+    }
+  }
+
+  try {
+    webpush.setVapidDetails(VAPID_EMAIL, pub, priv);
+    vapidPublic = pub;
+    pushEnabled = true;
+    console.log('Web Push enabled');
+  } catch (err) {
+    console.log('Web Push init error:', err.message);
+  }
 }
 
 function getPublicKey() {
-  return VAPID_PUBLIC;
+  return vapidPublic;
+}
+
+function isEnabled() {
+  return pushEnabled;
 }
 
 async function saveSubscription(userId, subscription) {
@@ -76,4 +114,4 @@ async function notifyRequestStatusChange(requestId, newStatus) {
   } catch {}
 }
 
-module.exports = { getPublicKey, saveSubscription, removeSubscription, notifyUser, notifyRequestStatusChange };
+module.exports = { init, getPublicKey, isEnabled, saveSubscription, removeSubscription, notifyUser, notifyRequestStatusChange };

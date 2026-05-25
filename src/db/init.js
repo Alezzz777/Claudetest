@@ -67,6 +67,11 @@ async function initDB() {
       );
 
       CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id);
+
+      CREATE TABLE IF NOT EXISTS app_settings (
+        key VARCHAR(100) PRIMARY KEY,
+        value TEXT NOT NULL
+      );
     `);
 
     const existing = await client.query("SELECT id FROM users WHERE username = 'dispatcher1'");
