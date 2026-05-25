@@ -1,0 +1,22 @@
+databases:
+  - name: cargo-transport-db
+    plan: free
+    databaseName: cargo_transport
+    user: cargo_user
+
+services:
+  - type: web
+    plan: free
+    name: cargo-transport-app
+    runtime: node
+    buildCommand: npm install
+    startCommand: node src/db/init.js && node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: cargo-transport-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
