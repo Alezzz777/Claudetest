@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Грузоперевозки</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+<!-- ── Toast ── -->
+<div id="toast" class="toast"></div>
+
+<!-- ── Login Screen ── -->
+<div id="auth-screen" class="login-container">
+  <div class="login-box">
+    <h2>Грузоперевозки</h2>
+    <p class="subtitle">Управление заявками</p>
+
+    <!-- Login Form -->
+    <form id="login-form">
+      <div class="form-group">
+        <label>Логин</label>
+        <input type="text" id="login-username" autocomplete="username" required>
+      </div>
+      <div class="form-group">
+        <label>Пароль</label>
+        <input type="password" id="login-password" autocomplete="current-password" required>
+      </div>
+      <button type="submit" class="btn btn-primary">Войти</button>
+    </form>
+
+    <!-- Register Form -->
+    <form id="register-form" style="display:none">
+      <div class="form-group">
+        <label>Логин</label>
+        <input type="text" id="reg-username" autocomplete="username" required>
+      </div>
+      <div class="form-group">
+        <label>Пароль</label>
+        <input type="password" id="reg-password" autocomplete="new-password" required>
+      </div>
+      <div class="form-group">
+        <label>ФИО</label>
+        <input type="text" id="reg-fullname" required>
+      </div>
+      <div class="form-group">
+        <label>Роль</label>
+        <select id="reg-role" required>
+          <option value="">Выберите роль</option>
+          <option value="sender">Отправитель</option>
+          <option value="receiver">Получатель</option>
+          <option value="transporter">Транспортировщик</option>
+          <option value="dispatcher">Диспетчер</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Телефон</label>
+        <input type="tel" id="reg-phone">
+      </div>
+      <button type="submit" class="btn btn-primary">Зарегистрироваться</button>
+    </form>
+
+    <div class="auth-toggle">
+      <span id="auth-toggle-text">Нет аккаунта? </span>
+      <a id="auth-toggle-link" onclick="toggleAuthForm()">Регистрация</a>
+    </div>
+  </div>
+</div>
+
+<!-- ── Main App ── -->
+<div id="app-screen" style="display:none">
+  <header class="header">
+    <div>
+      <h1>Грузоперевозки</h1>
+      <div class="header-user" id="header-user"></div>
+    </div>
+    <div class="header-actions">
+      <button class="btn-logout" onclick="logout()">Выход</button>
+    </div>
+  </header>
+
+  <!-- Dashboard -->
+  <div id="view-dashboard" class="view active">
+    <div id="stats-container" class="stats-grid"></div>
+    <h3 style="font-size:16px;margin-bottom:12px">Последние заявки</h3>
+    <div id="recent-requests" class="request-list"></div>
+  </div>
+
+  <!-- Requests List -->
+  <div id="view-requests" class="view">
+    <div id="filter-tabs" class="filter-tabs"></div>
+    <div id="requests-list" class="request-list"></div>
+    <div id="requests-pagination" style="text-align:center;margin-top:16px"></div>
+  </div>
+
+  <!-- Request Detail -->
+  <div id="view-detail" class="view">
+    <button class="back-btn" onclick="navigateTo(previousView || 'requests')">&larr; Назад</button>
+    <div id="detail-content"></div>
+  </div>
+
+  <!-- New Request (sender, dispatcher) -->
+  <div id="view-new" class="view">
+    <h3 style="font-size:18px;margin-bottom:16px">Новая заявка</h3>
+    <form id="new-request-form" class="detail-section">
+      <div class="form-group">
+        <label>Описание груза *</label>
+        <textarea id="nr-cargo" required></textarea>
+      </div>
+      <div class="form-group">
+        <label>Вес (кг)</label>
+        <input type="number" id="nr-weight" step="0.1" min="0">
+      </div>
+      <div class="form-group">
+        <label>Место отправки *</label>
+        <input type="text" id="nr-pickup" required>
+      </div>
+      <div class="form-group">
+        <label>Место доставки *</label>
+        <input type="text" id="nr-delivery" required>
+      </div>
+      <div class="form-group">
+        <label>Получатель</label>
+        <select id="nr-receiver"><option value="">Не указан</option></select>
+      </div>
+      <div class="form-group">
+        <label>Приоритет</label>
+        <select id="nr-priority">
+          <option value="low">Низкий</option>
+          <option value="normal" selected>Обычный</option>
+          <option value="high">Высокий</option>
+          <option value="urgent">Срочный</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Примечания</label>
+        <textarea id="nr-notes"></textarea>
+      </div>
+      <button type="submit" class="btn btn-primary">Создать заявку</button>
+    </form>
+  </div>
+
+  <!-- Bottom Navigation -->
+  <nav class="bottom-nav" id="bottom-nav">
+    <button class="nav-item active" data-view="dashboard">
+      <span class="nav-icon">&#9776;</span>
+      Главная
+    </button>
+    <button class="nav-item" data-view="requests">
+      <span class="nav-icon">&#128220;</span>
+      Заявки
+    </button>
+    <button class="nav-item" data-view="new" id="nav-new" style="display:none">
+      <span class="nav-icon">&#10010;</span>
+      Новая
+    </button>
+  </nav>
+</div>
+
+<!-- ── Assign Modal ── -->
+<div id="assign-modal" class="modal-overlay">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal('assign-modal')">&times;</button>
+    <h3>Назначить транспортировщика</h3>
+    <form id="assign-form">
+      <div class="form-group">
+        <label>Транспортировщик *</label>
+        <select id="assign-transporter" required></select>
+      </div>
+      <div class="form-group">
+        <label>Получатель</label>
+        <select id="assign-receiver"><option value="">Не менять</option></select>
+      </div>
+      <button type="submit" class="btn btn-primary">Назначить</button>
+    </form>
+  </div>
+</div>
+
+<!-- ── Reject Modal ── -->
+<div id="reject-modal" class="modal-overlay">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal('reject-modal')">&times;</button>
+    <h3>Отклонить заявку</h3>
+    <form id="reject-form">
+      <div class="form-group">
+        <label>Причина отклонения *</label>
+        <textarea id="reject-comment" required></textarea>
+      </div>
+      <button type="submit" class="btn btn-danger">Отклонить</button>
+    </form>
+  </div>
+</div>
+
+<script src="/js/app.js"></script>
+</body>
+</html>
