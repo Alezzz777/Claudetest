@@ -146,6 +146,7 @@ async function showApp() {
   document.getElementById('nav-profile').style.display = currentUser.role === 'executor' ? 'flex' : 'none';
 
   startPing();
+  initPush();
   navigateTo('dashboard');
 }
 
@@ -782,6 +783,37 @@ function formatDate(iso) {
   if (!iso) return '—';
   const d = new Date(iso);
   return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+// ── Push Notifications ──
+async function initPush() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  try {
+    const reg = await navigator.serviceWorker.register('/sw.js');
+    const existing = await reg.pushManager.getSubscription();
+    if (existing) {
+      await api('/push/subscribe', { method: 'POST', body: JSON.stringify({ subscription: existing }) });
+      return;
+    }
+    const permResult = await Notification.requestPermission();
+    if (permResult !== 'granted') return;
+    const { key } = await api('/push/vapid-key');
+    if (!key) return;
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(key)
+    });
+    await api('/push/subscribe', { method: 'POST', body: JSON.stringify({ subscription: sub }) });
+  } catch {}
+}
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  const arr = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+  return arr;
 }
 
 // ── Auto-login ──

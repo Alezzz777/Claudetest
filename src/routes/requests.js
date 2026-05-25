@@ -1,6 +1,7 @@
 const express = require('express');
 const pool = require('../db/pool');
 const { authenticate, authorize } = require('../middleware/auth');
+const { notifyRequestStatusChange } = require('../push');
 
 const router = express.Router();
 router.use(authenticate);
@@ -213,6 +214,7 @@ router.patch('/:id/take', authorize('executor'), async (req, res) => {
       [req.params.id, 'in_progress', req.user.id, 'Исполнитель взял заявку']
     );
 
+    notifyRequestStatusChange(req.params.id, 'in_progress');
     res.json(result.rows[0]);
   } catch {
     res.status(500).json({ error: 'Ошибка взятия заявки' });
@@ -250,6 +252,7 @@ router.patch('/:id/assign', authorize('dispatcher'), async (req, res) => {
       [req.params.id, 'assigned', req.user.id, 'Назначен исполнитель']
     );
 
+    notifyRequestStatusChange(req.params.id, 'assigned');
     res.json(result.rows[0]);
   } catch {
     res.status(500).json({ error: 'Ошибка назначения' });
@@ -294,6 +297,7 @@ router.patch('/:id/status', async (req, res) => {
       [req.params.id, status, req.user.id, comment || null]
     );
 
+    notifyRequestStatusChange(req.params.id, status);
     res.json(result.rows[0]);
   } catch {
     res.status(500).json({ error: 'Ошибка обновления статуса' });
@@ -370,6 +374,7 @@ router.patch('/:id/reject', authorize('client', 'dispatcher'), async (req, res) 
       [req.params.id, 'rejected', req.user.id, comment]
     );
 
+    notifyRequestStatusChange(req.params.id, 'rejected');
     res.json(result.rows[0]);
   } catch {
     res.status(500).json({ error: 'Ошибка отклонения' });

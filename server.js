@@ -1,6 +1,8 @@
 const express = require('express');
 const path = require('path');
 const pool = require('./src/db/pool');
+const push = require('./src/push');
+const { authenticate } = require('./src/middleware/auth');
 const authRoutes = require('./src/routes/auth');
 const requestRoutes = require('./src/routes/requests');
 const userRoutes = require('./src/routes/users');
@@ -28,6 +30,34 @@ app.get('/api/health', async (req, res) => {
 
 app.get('/api/ping', (req, res) => {
   res.json({ pong: true });
+});
+
+app.get('/api/push/vapid-key', (req, res) => {
+  res.json({ key: push.getPublicKey() });
+});
+
+app.post('/api/push/subscribe', authenticate, async (req, res) => {
+  const { subscription } = req.body;
+  if (!subscription || !subscription.endpoint || !subscription.keys) {
+    return res.status(400).json({ error: 'Невалидная подписка' });
+  }
+  try {
+    await push.saveSubscription(req.user.id, subscription);
+    res.json({ ok: true });
+  } catch {
+    res.status(500).json({ error: 'Ошибка сохранения подписки' });
+  }
+});
+
+app.post('/api/push/unsubscribe', authenticate, async (req, res) => {
+  const { endpoint } = req.body;
+  if (!endpoint) return res.status(400).json({ error: 'Укажите endpoint' });
+  try {
+    await push.removeSubscription(endpoint);
+    res.json({ ok: true });
+  } catch {
+    res.status(500).json({ error: 'Ошибка отписки' });
+  }
 });
 
 app.use('/api/auth', authRoutes);
