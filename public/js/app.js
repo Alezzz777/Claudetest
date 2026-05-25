@@ -5,8 +5,9 @@ let currentFilter = '';
 let currentPage = 1;
 let previousView = 'dashboard';
 let currentDetailId = null;
+let pingInterval = null;
 
-const ROLE_LABELS = { sender: 'Отправитель', receiver: 'Получатель', dispatcher: 'Диспетчер', transporter: 'Транспортировщик' };
+const ROLE_LABELS = { sender: 'Отправитель', client: 'Клиент', dispatcher: 'Диспетчер' };
 const STATUS_LABELS = { new: 'Новая', assigned: 'Назначена', in_progress: 'В пути', delivered: 'Доставлена', confirmed: 'Подтверждена', rejected: 'Отклонена' };
 const PRIORITY_LABELS = { low: 'Низкий', normal: 'Обычный', high: 'Высокий', urgent: 'Срочный' };
 
@@ -26,6 +27,33 @@ function showToast(msg, type = 'success') {
   t.textContent = msg;
   t.className = `toast toast-${type} show`;
   setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+// ── Connection Indicator ──
+function setConnectionStatus(online) {
+  const el = document.getElementById('connection-indicator');
+  if (!el) return;
+  el.className = `conn-indicator ${online ? 'online' : 'offline'}`;
+  el.querySelector('.conn-label').textContent = online ? 'Online' : 'Offline';
+}
+
+async function checkConnection() {
+  try {
+    await fetch(API + '/ping', { method: 'GET', cache: 'no-store' });
+    setConnectionStatus(true);
+  } catch {
+    setConnectionStatus(false);
+  }
+}
+
+function startPing() {
+  checkConnection();
+  if (pingInterval) clearInterval(pingInterval);
+  pingInterval = setInterval(checkConnection, 10000);
+}
+
+function stopPing() {
+  if (pingInterval) { clearInterval(pingInterval); pingInterval = null; }
 }
 
 // ── Auth ──
@@ -92,6 +120,7 @@ function logout() {
   token = null;
   currentUser = null;
   localStorage.removeItem('token');
+  stopPing();
   document.getElementById('app-screen').style.display = 'none';
   document.getElementById('auth-screen').style.display = 'flex';
 }
@@ -102,9 +131,10 @@ async function showApp() {
   document.getElementById('app-screen').style.display = 'block';
   document.getElementById('header-user').textContent = `${currentUser.full_name} (${ROLE_LABELS[currentUser.role]})`;
 
-  const navNew = document.getElementById('nav-new');
-  navNew.style.display = ['sender', 'dispatcher'].includes(currentUser.role) ? 'flex' : 'none';
+  document.getElementById('nav-new').style.display = ['sender', 'dispatcher'].includes(currentUser.role) ? 'flex' : 'none';
+  document.getElementById('nav-locations').style.display = currentUser.role === 'dispatcher' ? 'flex' : 'none';
 
+  startPing();
   navigateTo('dashboard');
 }
 
@@ -119,6 +149,8 @@ function navigateTo(view) {
   if (view === 'dashboard') loadDashboard();
   else if (view === 'requests') { currentPage = 1; loadRequests(); }
   else if (view === 'new') loadNewRequestForm();
+  else if (view === 'locations') loadLocations();
+  else if (view === 'health') loadHealth();
 }
 
 document.querySelectorAll('.nav-item').forEach(btn => {
@@ -243,13 +275,13 @@ function renderDetail(r) {
   if (role === 'dispatcher' && ['new', 'assigned'].includes(r.status)) {
     actionsHtml += `<button class="btn btn-primary btn-sm" onclick="openAssignModal(${r.id})">Назначить</button>`;
   }
-  if (role === 'transporter' && r.status === 'assigned') {
+  if (role === 'client' && r.status === 'assigned') {
     actionsHtml += `<button class="btn btn-warning btn-sm" onclick="changeStatus(${r.id},'in_progress')">Взять в работу</button>`;
   }
-  if (role === 'transporter' && r.status === 'in_progress') {
+  if (role === 'client' && r.status === 'in_progress') {
     actionsHtml += `<button class="btn btn-success btn-sm" onclick="changeStatus(${r.id},'delivered')">Доставлено</button>`;
   }
-  if (role === 'receiver' && r.status === 'delivered') {
+  if (role === 'client' && r.status === 'delivered') {
     actionsHtml += `<button class="btn btn-success btn-sm" onclick="changeStatus(${r.id},'confirmed')">Подтвердить</button>`;
     actionsHtml += `<button class="btn btn-danger btn-sm" onclick="openRejectModal(${r.id})">Отклонить</button>`;
   }
@@ -291,9 +323,8 @@ function renderDetail(r) {
     <div class="detail-section">
       <h3>Участники</h3>
       <div class="detail-row"><span class="detail-label">Отправитель</span><span class="detail-value">${r.sender_name || '—'}${r.sender_phone ? '<br>' + r.sender_phone : ''}</span></div>
-      <div class="detail-row"><span class="detail-label">Получатель</span><span class="detail-value">${r.receiver_name || '—'}${r.receiver_phone ? '<br>' + r.receiver_phone : ''}</span></div>
+      <div class="detail-row"><span class="detail-label">Клиент</span><span class="detail-value">${r.client_name || '—'}${r.client_phone ? '<br>' + r.client_phone : ''}</span></div>
       <div class="detail-row"><span class="detail-label">Диспетчер</span><span class="detail-value">${r.dispatcher_name || '—'}</span></div>
-      <div class="detail-row"><span class="detail-label">Транспортировщик</span><span class="detail-value">${r.transporter_name || '—'}${r.transporter_phone ? '<br>' + r.transporter_phone : ''}</span></div>
     </div>
 
     <div class="detail-section">
@@ -321,14 +352,9 @@ async function changeStatus(id, status) {
 async function openAssignModal(id) {
   currentDetailId = id;
   try {
-    const transporters = await api('/users/by-role/transporter');
-    const select = document.getElementById('assign-transporter');
-    select.innerHTML = transporters.map(t => `<option value="${t.id}">${t.full_name}</option>`).join('');
-
-    const receivers = await api('/users/by-role/receiver');
-    const recSelect = document.getElementById('assign-receiver');
-    recSelect.innerHTML = '<option value="">Не менять</option>' + receivers.map(r => `<option value="${r.id}">${r.full_name}</option>`).join('');
-
+    const clients = await api('/users/by-role/client');
+    const select = document.getElementById('assign-client');
+    select.innerHTML = clients.map(c => `<option value="${c.id}">${c.full_name}</option>`).join('');
     document.getElementById('assign-modal').classList.add('active');
   } catch (err) {
     showToast(err.message, 'error');
@@ -338,13 +364,10 @@ async function openAssignModal(id) {
 document.getElementById('assign-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   try {
-    const body = { transporter_id: parseInt(document.getElementById('assign-transporter').value) };
-    const recId = document.getElementById('assign-receiver').value;
-    if (recId) body.receiver_id = parseInt(recId);
-
+    const body = { client_id: parseInt(document.getElementById('assign-client').value) };
     await api(`/requests/${currentDetailId}/assign`, { method: 'PATCH', body: JSON.stringify(body) });
     closeModal('assign-modal');
-    showToast('Транспортировщик назначен');
+    showToast('Исполнитель назначен');
     openDetail(currentDetailId);
   } catch (err) {
     showToast(err.message, 'error');
@@ -380,9 +403,19 @@ function closeModal(id) {
 // ── New Request Form ──
 async function loadNewRequestForm() {
   try {
-    const receivers = await api('/users/by-role/receiver');
-    const select = document.getElementById('nr-receiver');
-    select.innerHTML = '<option value="">Не указан</option>' + receivers.map(r => `<option value="${r.id}">${r.full_name}</option>`).join('');
+    const [clients, locations] = await Promise.all([
+      api('/users/by-role/client'),
+      api('/locations')
+    ]);
+
+    const clientSelect = document.getElementById('nr-client');
+    clientSelect.innerHTML = '<option value="">Не указан</option>' + clients.map(c => `<option value="${c.id}">${c.full_name}</option>`).join('');
+
+    const pickupSelect = document.getElementById('nr-pickup');
+    const deliverySelect = document.getElementById('nr-delivery');
+    const locOptions = locations.map(l => `<option value="${escapeHtml(l.name + (l.address ? ' (' + l.address + ')' : ''))}">${escapeHtml(l.name)}${l.address ? ' — ' + escapeHtml(l.address) : ''}</option>`).join('');
+    pickupSelect.innerHTML = '<option value="">Выберите место</option>' + locOptions;
+    deliverySelect.innerHTML = '<option value="">Выберите место</option>' + locOptions;
   } catch {}
 }
 
@@ -397,8 +430,8 @@ document.getElementById('new-request-form').addEventListener('submit', async (e)
       priority: document.getElementById('nr-priority').value,
       notes: document.getElementById('nr-notes').value || null,
     };
-    const recId = document.getElementById('nr-receiver').value;
-    if (recId) body.receiver_id = parseInt(recId);
+    const clientId = document.getElementById('nr-client').value;
+    if (clientId) body.client_id = parseInt(clientId);
 
     const result = await api('/requests', { method: 'POST', body: JSON.stringify(body) });
     showToast('Заявка #' + result.id + ' создана');
@@ -409,12 +442,124 @@ document.getElementById('new-request-form').addEventListener('submit', async (e)
   }
 });
 
+// ── Locations Management ──
+async function loadLocations() {
+  const container = document.getElementById('locations-list');
+  try {
+    const locations = await api('/locations');
+    if (!locations.length) {
+      container.innerHTML = '<div class="empty-state"><div class="empty-icon">&#128205;</div><p>Мест пока нет</p></div>';
+      return;
+    }
+    container.innerHTML = locations.map(l => `
+      <div class="location-card">
+        <div class="location-info">
+          <div class="location-name">${escapeHtml(l.name)}</div>
+          ${l.address ? `<div class="location-address">${escapeHtml(l.address)}</div>` : ''}
+        </div>
+        <div class="location-actions">
+          <button class="btn btn-outline btn-sm" onclick="openLocationModal(${l.id}, '${escapeAttr(l.name)}', '${escapeAttr(l.address || '')}')">Ред.</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteLocation(${l.id})">Уд.</button>
+        </div>
+      </div>
+    `).join('');
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+function openLocationModal(id, name, address) {
+  document.getElementById('loc-id').value = id || '';
+  document.getElementById('loc-name').value = name || '';
+  document.getElementById('loc-address').value = address || '';
+  document.getElementById('location-modal-title').textContent = id ? 'Редактировать место' : 'Добавить место';
+  document.getElementById('location-modal').classList.add('active');
+}
+
+document.getElementById('location-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('loc-id').value;
+  const body = {
+    name: document.getElementById('loc-name').value,
+    address: document.getElementById('loc-address').value || null
+  };
+
+  try {
+    if (id) {
+      await api(`/locations/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+      showToast('Место обновлено');
+    } else {
+      await api('/locations', { method: 'POST', body: JSON.stringify(body) });
+      showToast('Место добавлено');
+    }
+    closeModal('location-modal');
+    loadLocations();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+});
+
+async function deleteLocation(id) {
+  if (!confirm('Удалить это место?')) return;
+  try {
+    await api(`/locations/${id}`, { method: 'DELETE' });
+    showToast('Место удалено');
+    loadLocations();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+// ── Health Page ──
+async function loadHealth() {
+  const container = document.getElementById('health-content');
+  container.innerHTML = '<div class="loading">Проверка...</div>';
+
+  try {
+    const start = Date.now();
+    const data = await api('/health');
+    const latency = Date.now() - start;
+
+    container.innerHTML = `
+      <div class="health-row">
+        <span>Сервер</span>
+        <span class="${data.server === 'ok' ? 'health-ok' : 'health-err'}">${data.server === 'ok' ? 'Работает' : 'Ошибка'}</span>
+      </div>
+      <div class="health-row">
+        <span>База данных</span>
+        <span class="${data.database === 'ok' ? 'health-ok' : 'health-err'}">${data.database === 'ok' ? 'Подключена' : 'Ошибка'}</span>
+      </div>
+      <div class="health-row">
+        <span>Задержка (ping)</span>
+        <span>${latency} мс</span>
+      </div>
+      <div class="health-row">
+        <span>Время сервера</span>
+        <span>${formatDate(data.timestamp)}</span>
+      </div>
+      ${data.db_time ? `<div class="health-row"><span>Время БД</span><span>${formatDate(data.db_time)}</span></div>` : ''}
+    `;
+  } catch {
+    container.innerHTML = `
+      <div class="health-row">
+        <span>Сервер</span>
+        <span class="health-err">Недоступен</span>
+      </div>
+    `;
+  }
+}
+
 // ── Helpers ──
 function escapeHtml(str) {
   if (!str) return '';
   const div = document.createElement('div');
   div.textContent = str;
   return div.innerHTML;
+}
+
+function escapeAttr(str) {
+  if (!str) return '';
+  return str.replace(/'/g, "\\'").replace(/"/g, '&quot;');
 }
 
 function formatDate(iso) {

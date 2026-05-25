@@ -18,11 +18,8 @@ router.get('/', async (req, res) => {
   if (role === 'sender') {
     where = `WHERE r.sender_id = $${paramIdx++}`;
     params.push(id);
-  } else if (role === 'receiver') {
-    where = `WHERE r.receiver_id = $${paramIdx++}`;
-    params.push(id);
-  } else if (role === 'transporter') {
-    where = `WHERE r.transporter_id = $${paramIdx++}`;
+  } else if (role === 'client') {
+    where = `WHERE r.client_id = $${paramIdx++}`;
     params.push(id);
   }
 
@@ -41,14 +38,12 @@ router.get('/', async (req, res) => {
     const result = await pool.query(`
       SELECT r.*,
         s.full_name as sender_name,
-        rv.full_name as receiver_name,
-        d.full_name as dispatcher_name,
-        t.full_name as transporter_name
+        c.full_name as client_name,
+        d.full_name as dispatcher_name
       FROM transport_requests r
       LEFT JOIN users s ON r.sender_id = s.id
-      LEFT JOIN users rv ON r.receiver_id = rv.id
+      LEFT JOIN users c ON r.client_id = c.id
       LEFT JOIN users d ON r.dispatcher_id = d.id
-      LEFT JOIN users t ON r.transporter_id = t.id
       ${where}
       ORDER BY
         CASE r.priority WHEN 'urgent' THEN 1 WHEN 'high' THEN 2 WHEN 'normal' THEN 3 ELSE 4 END,
@@ -68,8 +63,7 @@ router.get('/stats', async (req, res) => {
   const params = [];
 
   if (role === 'sender') { filter = 'WHERE sender_id = $1'; params.push(id); }
-  else if (role === 'receiver') { filter = 'WHERE receiver_id = $1'; params.push(id); }
-  else if (role === 'transporter') { filter = 'WHERE transporter_id = $1'; params.push(id); }
+  else if (role === 'client') { filter = 'WHERE client_id = $1'; params.push(id); }
 
   try {
     const result = await pool.query(`
@@ -91,14 +85,12 @@ router.get('/:id', async (req, res) => {
     const result = await pool.query(`
       SELECT r.*,
         s.full_name as sender_name, s.phone as sender_phone,
-        rv.full_name as receiver_name, rv.phone as receiver_phone,
-        d.full_name as dispatcher_name,
-        t.full_name as transporter_name, t.phone as transporter_phone
+        c.full_name as client_name, c.phone as client_phone,
+        d.full_name as dispatcher_name
       FROM transport_requests r
       LEFT JOIN users s ON r.sender_id = s.id
-      LEFT JOIN users rv ON r.receiver_id = rv.id
+      LEFT JOIN users c ON r.client_id = c.id
       LEFT JOIN users d ON r.dispatcher_id = d.id
-      LEFT JOIN users t ON r.transporter_id = t.id
       WHERE r.id = $1
     `, [req.params.id]);
 
@@ -119,18 +111,18 @@ router.get('/:id', async (req, res) => {
 });
 
 router.post('/', authorize('sender', 'dispatcher'), async (req, res) => {
-  const { cargo_description, weight, pickup_location, delivery_location, receiver_id, priority, notes } = req.body;
+  const { cargo_description, weight, pickup_location, delivery_location, client_id, priority, notes } = req.body;
 
   if (!cargo_description || !pickup_location || !delivery_location) {
-    return res.status(400).json({ error: 'Заполните описание груза, адрес отправки и доставки' });
+    return res.status(400).json({ error: 'Заполните описание груза, место отправки и доставки' });
   }
 
   try {
     const result = await pool.query(`
-      INSERT INTO transport_requests (sender_id, receiver_id, cargo_description, weight, pickup_location, delivery_location, priority, notes)
+      INSERT INTO transport_requests (sender_id, client_id, cargo_description, weight, pickup_location, delivery_location, priority, notes)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING *
-    `, [req.user.id, receiver_id || null, cargo_description, weight || null, pickup_location, delivery_location, priority || 'normal', notes || null]);
+    `, [req.user.id, client_id || null, cargo_description, weight || null, pickup_location, delivery_location, priority || 'normal', notes || null]);
 
     const request = result.rows[0];
 
@@ -146,8 +138,8 @@ router.post('/', authorize('sender', 'dispatcher'), async (req, res) => {
 });
 
 router.patch('/:id/assign', authorize('dispatcher'), async (req, res) => {
-  const { transporter_id, receiver_id } = req.body;
-  if (!transporter_id) return res.status(400).json({ error: 'Укажите транспортировщика' });
+  const { client_id } = req.body;
+  if (!client_id) return res.status(400).json({ error: 'Укажите клиента-исполнителя' });
 
   try {
     const check = await pool.query('SELECT * FROM transport_requests WHERE id = $1', [req.params.id]);
@@ -156,24 +148,14 @@ router.patch('/:id/assign', authorize('dispatcher'), async (req, res) => {
       return res.status(400).json({ error: 'Невозможно назначить — заявка уже в работе' });
     }
 
-    const sets = ['transporter_id = $1', 'dispatcher_id = $2', "status = 'assigned'", 'updated_at = NOW()'];
-    const params = [transporter_id, req.user.id];
-    let paramIdx = 3;
-
-    if (receiver_id) {
-      sets.push(`receiver_id = $${paramIdx++}`);
-      params.push(receiver_id);
-    }
-
-    params.push(req.params.id);
     const result = await pool.query(
-      `UPDATE transport_requests SET ${sets.join(', ')} WHERE id = $${paramIdx} RETURNING *`,
-      params
+      `UPDATE transport_requests SET client_id = $1, dispatcher_id = $2, status = 'assigned', updated_at = NOW() WHERE id = $3 RETURNING *`,
+      [client_id, req.user.id, req.params.id]
     );
 
     await pool.query(
       'INSERT INTO status_history (request_id, status, changed_by, comment) VALUES ($1, $2, $3, $4)',
-      [req.params.id, 'assigned', req.user.id, 'Назначен транспортировщик']
+      [req.params.id, 'assigned', req.user.id, 'Назначен исполнитель']
     );
 
     res.json(result.rows[0]);
@@ -187,8 +169,7 @@ router.patch('/:id/status', async (req, res) => {
   const { role } = req.user;
 
   const allowedTransitions = {
-    transporter: { assigned: 'in_progress', in_progress: 'delivered' },
-    receiver: { delivered: 'confirmed' },
+    client: { assigned: 'in_progress', in_progress: 'delivered', delivered: 'confirmed' },
     dispatcher: { new: 'assigned', assigned: 'in_progress', in_progress: 'delivered', delivered: 'confirmed' },
   };
 
@@ -219,7 +200,7 @@ router.patch('/:id/status', async (req, res) => {
   }
 });
 
-router.patch('/:id/reject', authorize('receiver', 'dispatcher'), async (req, res) => {
+router.patch('/:id/reject', authorize('client', 'dispatcher'), async (req, res) => {
   const { comment } = req.body;
   if (!comment) return res.status(400).json({ error: 'Укажите причину отклонения' });
 

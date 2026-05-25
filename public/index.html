@@ -51,8 +51,7 @@
         <select id="reg-role" required>
           <option value="">Выберите роль</option>
           <option value="sender">Отправитель</option>
-          <option value="receiver">Получатель</option>
-          <option value="transporter">Транспортировщик</option>
+          <option value="client">Клиент (исполнитель/получатель)</option>
           <option value="dispatcher">Диспетчер</option>
         </select>
       </div>
@@ -78,6 +77,10 @@
       <div class="header-user" id="header-user"></div>
     </div>
     <div class="header-actions">
+      <span id="connection-indicator" class="conn-indicator" title="Связь с сервером">
+        <span class="conn-dot"></span>
+        <span class="conn-label">...</span>
+      </span>
       <button class="btn-logout" onclick="logout()">Выход</button>
     </div>
   </header>
@@ -116,15 +119,15 @@
       </div>
       <div class="form-group">
         <label>Место отправки *</label>
-        <input type="text" id="nr-pickup" required>
+        <select id="nr-pickup" required><option value="">Загрузка...</option></select>
       </div>
       <div class="form-group">
         <label>Место доставки *</label>
-        <input type="text" id="nr-delivery" required>
+        <select id="nr-delivery" required><option value="">Загрузка...</option></select>
       </div>
       <div class="form-group">
-        <label>Получатель</label>
-        <select id="nr-receiver"><option value="">Не указан</option></select>
+        <label>Клиент (исполнитель)</label>
+        <select id="nr-client"><option value="">Не указан</option></select>
       </div>
       <div class="form-group">
         <label>Приоритет</label>
@@ -143,6 +146,24 @@
     </form>
   </div>
 
+  <!-- Locations Management (dispatcher only) -->
+  <div id="view-locations" class="view">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <h3 style="font-size:18px">Места получения</h3>
+      <button class="btn btn-primary btn-sm" onclick="openLocationModal()">Добавить</button>
+    </div>
+    <div id="locations-list"></div>
+  </div>
+
+  <!-- Health Page -->
+  <div id="view-health" class="view">
+    <h3 style="font-size:18px;margin-bottom:16px">Состояние системы</h3>
+    <div id="health-content" class="detail-section">
+      <div class="loading">Проверка...</div>
+    </div>
+    <button class="btn btn-outline" onclick="loadHealth()" style="margin-top:12px">Обновить</button>
+  </div>
+
   <!-- Bottom Navigation -->
   <nav class="bottom-nav" id="bottom-nav">
     <button class="nav-item active" data-view="dashboard">
@@ -157,6 +178,14 @@
       <span class="nav-icon">&#10010;</span>
       Новая
     </button>
+    <button class="nav-item" data-view="locations" id="nav-locations" style="display:none">
+      <span class="nav-icon">&#128205;</span>
+      Места
+    </button>
+    <button class="nav-item" data-view="health">
+      <span class="nav-icon">&#9881;</span>
+      Health
+    </button>
   </nav>
 </div>
 
@@ -164,15 +193,11 @@
 <div id="assign-modal" class="modal-overlay">
   <div class="modal">
     <button class="modal-close" onclick="closeModal('assign-modal')">&times;</button>
-    <h3>Назначить транспортировщика</h3>
+    <h3>Назначить исполнителя</h3>
     <form id="assign-form">
       <div class="form-group">
-        <label>Транспортировщик *</label>
-        <select id="assign-transporter" required></select>
-      </div>
-      <div class="form-group">
-        <label>Получатель</label>
-        <select id="assign-receiver"><option value="">Не менять</option></select>
+        <label>Клиент-исполнитель *</label>
+        <select id="assign-client" required></select>
       </div>
       <button type="submit" class="btn btn-primary">Назначить</button>
     </form>
@@ -190,6 +215,26 @@
         <textarea id="reject-comment" required></textarea>
       </div>
       <button type="submit" class="btn btn-danger">Отклонить</button>
+    </form>
+  </div>
+</div>
+
+<!-- ── Location Modal ── -->
+<div id="location-modal" class="modal-overlay">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal('location-modal')">&times;</button>
+    <h3 id="location-modal-title">Добавить место</h3>
+    <form id="location-form">
+      <input type="hidden" id="loc-id">
+      <div class="form-group">
+        <label>Название *</label>
+        <input type="text" id="loc-name" required>
+      </div>
+      <div class="form-group">
+        <label>Адрес / описание</label>
+        <input type="text" id="loc-address">
+      </div>
+      <button type="submit" class="btn btn-primary">Сохранить</button>
     </form>
   </div>
 </div>

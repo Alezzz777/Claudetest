@@ -52,6 +52,28 @@ body {
   cursor: pointer;
 }
 
+/* ── Connection indicator ── */
+.conn-indicator {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  background: rgba(255,255,255,.15);
+  cursor: default;
+}
+.conn-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--gray-300);
+  transition: background .3s;
+}
+.conn-indicator.online .conn-dot { background: #4ade80; box-shadow: 0 0 6px #4ade80; }
+.conn-indicator.offline .conn-dot { background: #f87171; box-shadow: 0 0 6px #f87171; }
+.conn-label { color: rgba(255,255,255,.9); }
+
 /* ── Views ── */
 .view { display: none; padding: 16px; padding-bottom: 80px; }
 .view.active { display: block; }
@@ -324,6 +346,28 @@ body {
 
 /* ── Loading ── */
 .loading { text-align: center; padding: 40px; color: var(--gray-500); font-size: 14px; }
+
+/* ── Location Card ── */
+.location-card {
+  background: #fff;
+  border-radius: var(--radius);
+  padding: 14px;
+  box-shadow: var(--shadow);
+  margin-bottom: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.location-info { flex: 1; }
+.location-name { font-weight: 600; font-size: 15px; }
+.location-address { font-size: 13px; color: var(--gray-500); margin-top: 2px; }
+.location-actions { display: flex; gap: 6px; }
+
+/* ── Health ── */
+.health-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--gray-100); font-size: 14px; }
+.health-row:last-child { border-bottom: none; }
+.health-ok { color: var(--success); font-weight: 600; }
+.health-err { color: var(--danger); font-weight: 600; }
 
 /* ── Landscape / tablet tweaks ── */
 @media (min-width: 600px) {
