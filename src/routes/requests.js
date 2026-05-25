@@ -90,6 +90,15 @@ router.get('/stats', async (req, res) => {
 });
 
 router.get('/leaderboard', async (req, res) => {
+  const { month } = req.query;
+  let dateFilter = '';
+  const params = [];
+
+  if (month) {
+    dateFilter = ' AND r.updated_at >= $1 AND r.updated_at < ($1::date + interval \'1 month\')';
+    params.push(month + '-01');
+  }
+
   try {
     const result = await pool.query(`
       SELECT
@@ -105,12 +114,20 @@ router.get('/leaderboard', async (req, res) => {
         ROUND(AVG(r.rating)::numeric, 1) as avg_rating,
         COUNT(r.rating) as rated_count
       FROM users u
-      LEFT JOIN transport_requests r ON r.executor_id = u.id AND r.status = 'confirmed'
+      LEFT JOIN transport_requests r ON r.executor_id = u.id AND r.status = 'confirmed'${dateFilter}
       WHERE u.role = 'executor'
       GROUP BY u.id, u.full_name, u.username
       ORDER BY points DESC, completed DESC
+    `, params);
+
+    const months = await pool.query(`
+      SELECT DISTINCT TO_CHAR(updated_at, 'YYYY-MM') as month
+      FROM transport_requests
+      WHERE status = 'confirmed'
+      ORDER BY month DESC
     `);
-    res.json(result.rows);
+
+    res.json({ rows: result.rows, months: months.rows.map(m => m.month) });
   } catch {
     res.status(500).json({ error: 'Ошибка загрузки рейтинга' });
   }

@@ -30,11 +30,13 @@ async function api(path, options = {}) {
 }
 
 // ── Toast ──
+let toastTimer = null;
 function showToast(msg, type = 'success') {
   const t = document.getElementById('toast');
   t.textContent = msg;
   t.className = `toast toast-${type} show`;
-  setTimeout(() => t.classList.remove('show'), 3000);
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.classList.remove('show'); toastTimer = null; }, 5000);
 }
 
 // ── Connection Indicator ──
@@ -159,7 +161,6 @@ function navigateTo(view) {
   else if (view === 'new') loadNewRequestForm();
   else if (view === 'locations') loadLocations();
   else if (view === 'leaderboard') loadLeaderboard();
-  else if (view === 'health') loadHealth();
 }
 
 document.querySelectorAll('.nav-item').forEach(btn => {
@@ -549,16 +550,36 @@ document.getElementById('new-request-form').addEventListener('submit', async (e)
 });
 
 // ── Leaderboard ──
-async function loadLeaderboard() {
+const MONTH_NAMES = ['', 'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+let currentLeaderboardMonth = '';
+
+function formatMonth(ym) {
+  const [y, m] = ym.split('-');
+  return `${MONTH_NAMES[parseInt(m)]} ${y}`;
+}
+
+async function loadLeaderboard(month) {
+  if (month !== undefined) currentLeaderboardMonth = month;
   const container = document.getElementById('leaderboard-content');
   container.innerHTML = '<div class="loading">Загрузка...</div>';
+
+  const qs = currentLeaderboardMonth ? `?month=${currentLeaderboardMonth}` : '';
   try {
-    const data = await api('/requests/leaderboard');
-    if (!data.length) {
-      container.innerHTML = '<div class="empty-state"><div class="empty-icon">&#127942;</div><p>Пока нет данных</p></div>';
+    const data = await api(`/requests/leaderboard${qs}`);
+    const { rows, months } = data;
+
+    const tabsEl = document.getElementById('leaderboard-months');
+    const tabs = [{ value: '', label: 'Все время' }];
+    (months || []).forEach(m => tabs.push({ value: m, label: formatMonth(m) }));
+    tabsEl.innerHTML = tabs.map(t =>
+      `<button class="filter-tab ${currentLeaderboardMonth === t.value ? 'active' : ''}" onclick="loadLeaderboard('${t.value}')">${t.label}</button>`
+    ).join('');
+
+    if (!rows.length) {
+      container.innerHTML = '<div class="empty-state"><div class="empty-icon">&#127942;</div><p>Нет данных за этот период</p></div>';
       return;
     }
-    container.innerHTML = data.map((e, i) => {
+    container.innerHTML = rows.map((e, i) => {
       const rankClass = i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
       const avgRating = e.avg_rating ? renderStars(Math.round(parseFloat(e.avg_rating))) + ` ${e.avg_rating}` : 'Нет оценок';
       return `
