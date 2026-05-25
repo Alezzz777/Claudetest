@@ -301,12 +301,19 @@ body {
   font-size: 14px;
   font-weight: 500;
   z-index: 200;
-  transform: translateY(200%);
-  transition: transform .3s ease;
+  transform: translateY(calc(100% + 90px));
+  opacity: 0;
+  visibility: hidden;
+  transition: transform .3s ease, opacity .3s ease, visibility 0s .3s;
   text-align: center;
   pointer-events: none;
 }
-.toast.show { transform: translateY(0); }
+.toast.show {
+  transform: translateY(0);
+  opacity: 1;
+  visibility: visible;
+  transition: transform .3s ease, opacity .3s ease, visibility 0s;
+}
 .toast-success { background: var(--success); }
 .toast-error { background: var(--danger); }
 
