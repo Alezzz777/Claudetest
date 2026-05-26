@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: lean-production-dashboard
+    runtime: static
+    buildCommand: echo "Static site — no build required"
+    staticPublishPath: .
+    pullRequestPreviewsEnabled: true
+    headers:
+      - path: /data/*
+        name: Cache-Control
+        value: no-cache, no-store, must-revalidate
+      - path: /css/*
+        name: Cache-Control
+        value: public, max-age=86400
+      - path: /js/*
+        name: Cache-Control
+        value: public, max-age=86400
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
