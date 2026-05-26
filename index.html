@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Дашборд производственного участка</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<header class="header">
+  <div class="header__left">
+    <h1 class="header__title" id="facilityName">Производственный участок</h1>
+    <span class="header__shift" id="shiftInfo"></span>
+  </div>
+  <div class="header__right">
+    <div class="header__safety" id="safetyBadge">
+      <span class="safety-icon">🛡️</span>
+      <span id="safetyDays">—</span> дн. без инцидентов
+    </div>
+    <div class="header__datetime">
+      <span id="currentDate"></span>
+      <span class="header__clock" id="currentTime"></span>
+    </div>
+  </div>
+</header>
+
+<main class="dashboard">
+
+  <!-- KPI Summary Row -->
+  <section class="kpi-row">
+    <div class="kpi-card" id="kpiProduction">
+      <div class="kpi-card__header">
+        <span class="kpi-card__icon">📦</span>
+        <span class="kpi-card__title">Выпуск продукции</span>
+      </div>
+      <div class="kpi-card__body">
+        <span class="kpi-card__value" id="prodActual">—</span>
+        <span class="kpi-card__separator">/</span>
+        <span class="kpi-card__target" id="prodPlan">—</span>
+      </div>
+      <div class="kpi-card__progress">
+        <div class="progress-bar">
+          <div class="progress-bar__fill" id="prodProgress"></div>
+        </div>
+        <span class="kpi-card__percent" id="prodPercent">—%</span>
+      </div>
+    </div>
+
+    <div class="kpi-card" id="kpiQuality">
+      <div class="kpi-card__header">
+        <span class="kpi-card__icon">✅</span>
+        <span class="kpi-card__title">Качество (FPY)</span>
+      </div>
+      <div class="kpi-card__body">
+        <span class="kpi-card__value" id="fpyValue">—%</span>
+      </div>
+      <div class="kpi-card__sub">
+        Брак: <span id="defectRate">—%</span> · Цель: <span id="defectTarget">—%</span>
+      </div>
+    </div>
+
+    <div class="kpi-card" id="kpiOEE">
+      <div class="kpi-card__header">
+        <span class="kpi-card__icon">⚙️</span>
+        <span class="kpi-card__title">OEE оборудования</span>
+      </div>
+      <div class="kpi-card__body">
+        <span class="kpi-card__value" id="oeeValue">—%</span>
+      </div>
+      <div class="kpi-card__sub">
+        Цель: <span id="oeeTarget">—%</span> · Простой: <span id="downtimeTotal">— мин</span>
+      </div>
+    </div>
+
+    <div class="kpi-card" id="kpiAttendance">
+      <div class="kpi-card__header">
+        <span class="kpi-card__icon">👥</span>
+        <span class="kpi-card__title">Явка персонала</span>
+      </div>
+      <div class="kpi-card__body">
+        <span class="kpi-card__value" id="attendanceValue">—%</span>
+      </div>
+      <div class="kpi-card__sub">
+        Присутствует: <span id="presentCount">—</span> / <span id="totalStaff">—</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Charts Row 1 -->
+  <section class="charts-row">
+    <div class="chart-panel">
+      <h2 class="chart-panel__title">Почасовой выпуск: план vs факт</h2>
+      <canvas id="chartHourly"></canvas>
+    </div>
+    <div class="chart-panel">
+      <h2 class="chart-panel__title">Выпуск по изделиям</h2>
+      <canvas id="chartProducts"></canvas>
+    </div>
+  </section>
+
+  <!-- Charts Row 2 -->
+  <section class="charts-row">
+    <div class="chart-panel">
+      <h2 class="chart-panel__title">Уровень брака (неделя), %</h2>
+      <canvas id="chartDefectTrend"></canvas>
+    </div>
+    <div class="chart-panel chart-panel--narrow">
+      <h2 class="chart-panel__title">Виды дефектов (Парето)</h2>
+      <canvas id="chartDefectTypes"></canvas>
+    </div>
+  </section>
+
+  <!-- Equipment & Personnel Details -->
+  <section class="details-row">
+    <div class="detail-panel">
+      <h2 class="detail-panel__title">Состояние оборудования</h2>
+      <div class="machine-grid" id="machineGrid"></div>
+      <h3 class="detail-panel__subtitle">Причины простоев</h3>
+      <div class="downtime-list" id="downtimeList"></div>
+      <div class="oee-breakdown">
+        <div class="oee-item">
+          <span class="oee-item__label">Доступность</span>
+          <span class="oee-item__value" id="oeeAvailability">—%</span>
+        </div>
+        <div class="oee-item">
+          <span class="oee-item__label">Производительность</span>
+          <span class="oee-item__value" id="oeePerformance">—%</span>
+        </div>
+        <div class="oee-item">
+          <span class="oee-item__label">Качество</span>
+          <span class="oee-item__value" id="oeeQualityRate">—%</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="detail-panel">
+      <h2 class="detail-panel__title">Персонал по ролям</h2>
+      <div class="personnel-table" id="personnelTable"></div>
+      <h3 class="detail-panel__subtitle">Причины отсутствий</h3>
+      <div class="absence-list" id="absenceList"></div>
+      <h3 class="detail-panel__subtitle">Явка за неделю</h3>
+      <canvas id="chartAttendanceTrend"></canvas>
+    </div>
+  </section>
+
+  <!-- Kaizen / Safety Footer -->
+  <section class="footer-row">
+    <div class="footer-card">
+      <h3>Кайдзен-предложения (месяц)</h3>
+      <div class="footer-card__stats">
+        <span class="stat stat--blue"><strong id="kaizenTotal">—</strong> подано</span>
+        <span class="stat stat--green"><strong id="kaizenDone">—</strong> внедрено</span>
+        <span class="stat stat--yellow"><strong id="kaizenPending">—</strong> в работе</span>
+      </div>
+    </div>
+    <div class="footer-card">
+      <h3>Безопасность (месяц)</h3>
+      <div class="footer-card__stats">
+        <span class="stat stat--green"><strong id="incidentsMonth">—</strong> инцидентов</span>
+        <span class="stat stat--yellow"><strong id="nearMisses">—</strong> предпосылок</span>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="page-footer">
+  <span>Обновлено: <span id="updatedAt">—</span></span>
+  <span>Lean Production Dashboard v1.0</span>
+</footer>
+
+<script src="js/dashboard.js"></script>
+</body>
+</html>

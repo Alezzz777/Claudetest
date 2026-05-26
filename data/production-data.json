@@ -1,0 +1,129 @@
+{
+  "meta": {
+    "facility": "Производственный участок №1",
+    "date": "2026-05-26",
+    "shift": "Смена A (08:00–20:00)",
+    "updated_at": "2026-05-26T14:30:00"
+  },
+
+  "production": {
+    "plan": 1200,
+    "actual": 1087,
+    "unit": "шт.",
+    "hourly": [
+      { "hour": "08:00", "plan": 100, "actual": 95 },
+      { "hour": "09:00", "plan": 100, "actual": 102 },
+      { "hour": "10:00", "plan": 100, "actual": 98 },
+      { "hour": "11:00", "plan": 100, "actual": 88 },
+      { "hour": "12:00", "plan": 100, "actual": 91 },
+      { "hour": "13:00", "plan": 100, "actual": 105 },
+      { "hour": "14:00", "plan": 100, "actual": 97 },
+      { "hour": "15:00", "plan": 100, "actual": 103 },
+      { "hour": "16:00", "plan": 100, "actual": 94 },
+      { "hour": "17:00", "plan": 100, "actual": 110 },
+      { "hour": "18:00", "plan": 100, "actual": 104 },
+      { "hour": "19:00", "plan": 0, "actual": 0 }
+    ],
+    "products": [
+      { "name": "Изделие А-100", "plan": 400, "actual": 372 },
+      { "name": "Изделие Б-200", "plan": 500, "actual": 468 },
+      { "name": "Изделие В-300", "plan": 300, "actual": 247 }
+    ]
+  },
+
+  "quality": {
+    "total_inspected": 1087,
+    "defects": 29,
+    "defect_rate_percent": 2.67,
+    "target_defect_rate_percent": 2.0,
+    "fpy_percent": 97.33,
+    "target_fpy_percent": 98.0,
+    "defect_types": [
+      { "type": "Размерное отклонение", "count": 11, "percent": 37.9 },
+      { "type": "Дефект поверхности", "count": 8, "percent": 27.6 },
+      { "type": "Неправильная сборка", "count": 5, "percent": 17.2 },
+      { "type": "Прочие", "count": 5, "percent": 17.2 }
+    ],
+    "daily_trend": [
+      { "date": "2026-05-20", "defect_rate": 3.1 },
+      { "date": "2026-05-21", "defect_rate": 2.8 },
+      { "date": "2026-05-22", "defect_rate": 2.5 },
+      { "date": "2026-05-23", "defect_rate": 2.9 },
+      { "date": "2026-05-24", "defect_rate": 2.2 },
+      { "date": "2026-05-25", "defect_rate": 2.4 },
+      { "date": "2026-05-26", "defect_rate": 2.67 }
+    ]
+  },
+
+  "equipment": {
+    "total_machines": 8,
+    "running": 6,
+    "idle": 1,
+    "under_maintenance": 1,
+    "oee_percent": 78.5,
+    "target_oee_percent": 85.0,
+    "availability_percent": 88.2,
+    "performance_percent": 91.0,
+    "quality_rate_percent": 97.8,
+    "total_downtime_minutes": 142,
+    "planned_downtime_minutes": 60,
+    "unplanned_downtime_minutes": 82,
+    "machines": [
+      { "id": "CNC-01", "name": "Токарный CNC", "status": "running", "oee": 85.2 },
+      { "id": "CNC-02", "name": "Фрезерный CNC", "status": "running", "oee": 79.1 },
+      { "id": "PRS-01", "name": "Пресс гидравлический", "status": "running", "oee": 82.4 },
+      { "id": "PRS-02", "name": "Пресс механический", "status": "idle", "oee": 0 },
+      { "id": "WLD-01", "name": "Сварочный робот", "status": "running", "oee": 74.8 },
+      { "id": "WLD-02", "name": "Сварочный пост", "status": "running", "oee": 68.3 },
+      { "id": "ASM-01", "name": "Линия сборки", "status": "running", "oee": 81.5 },
+      { "id": "GRN-01", "name": "Шлифовальный станок", "status": "maintenance", "oee": 0 }
+    ],
+    "downtime_reasons": [
+      { "reason": "Переналадка", "minutes": 60, "type": "planned" },
+      { "reason": "Поломка инструмента", "minutes": 35, "type": "unplanned" },
+      { "reason": "Ожидание материала", "minutes": 27, "type": "unplanned" },
+      { "reason": "Техническая неисправность", "minutes": 20, "type": "unplanned" }
+    ]
+  },
+
+  "personnel": {
+    "total_staff": 24,
+    "present": 21,
+    "absent": 3,
+    "attendance_percent": 87.5,
+    "target_attendance_percent": 95.0,
+    "absence_reasons": [
+      { "reason": "Больничный", "count": 1 },
+      { "reason": "Отпуск", "count": 1 },
+      { "reason": "Неявка", "count": 1 }
+    ],
+    "by_role": [
+      { "role": "Операторы станков", "total": 10, "present": 9 },
+      { "role": "Сборщики", "total": 6, "present": 5 },
+      { "role": "Контролёры ОТК", "total": 3, "present": 3 },
+      { "role": "Наладчики", "total": 3, "present": 2 },
+      { "role": "Мастер смены", "total": 2, "present": 2 }
+    ],
+    "weekly_attendance": [
+      { "date": "2026-05-20", "percent": 95.8 },
+      { "date": "2026-05-21", "percent": 91.7 },
+      { "date": "2026-05-22", "percent": 100.0 },
+      { "date": "2026-05-23", "percent": 87.5 },
+      { "date": "2026-05-24", "percent": 91.7 },
+      { "date": "2026-05-25", "percent": 95.8 },
+      { "date": "2026-05-26", "percent": 87.5 }
+    ]
+  },
+
+  "safety": {
+    "days_without_incident": 47,
+    "incidents_this_month": 0,
+    "near_misses_this_month": 2
+  },
+
+  "kaizen": {
+    "suggestions_this_month": 7,
+    "implemented_this_month": 3,
+    "pending": 4
+  }
+}
