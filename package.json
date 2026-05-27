@@ -1,0 +1,17 @@
+{
+  "name": "master-uchastka",
+  "version": "1.0.0",
+  "description": "Мобильное веб-приложение мастера участка",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "seed": "node db/seed.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "pg": "^8.13.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

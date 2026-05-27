@@ -7,8 +7,8 @@ const STATUS_LABELS = {
 
 let equipFilter = 'all';
 
-function renderEquipment() {
-    const list = Store.getEquipment();
+async function renderEquipment() {
+    const list = await Store.getEquipment();
     const container = document.getElementById('equipmentList');
 
     const filtered = equipFilter === 'all' ? list : list.filter(e => e.status === equipFilter);
@@ -22,7 +22,7 @@ function renderEquipment() {
     }
 
     container.innerHTML = filtered.map(eq => `
-        <div class="equip-card" onclick="editEquipment('${eq.id}')">
+        <div class="equip-card" onclick="editEquipment(${eq.id})">
             <div class="equip-status-dot ${eq.status}"></div>
             <div class="equip-info">
                 <div class="equip-name">${eq.name}</div>
@@ -66,43 +66,49 @@ function showAddEquipment() {
     );
 }
 
-function saveNewEquipment() {
+async function saveNewEquipment() {
     const name = document.getElementById('eqName').value.trim();
     const inventoryNo = document.getElementById('eqInvNo').value.trim();
     if (!name) { alert('Введите название'); return; }
-    Store.addEquipment({
+    await Store.addEquipment({
         name,
         inventoryNo,
         status: document.getElementById('eqStatus').value,
         note: document.getElementById('eqNote').value.trim(),
     });
     closeModal();
-    renderEquipment();
-    renderDashboard();
+    await Promise.all([renderEquipment(), renderDashboard(), refreshCaches()]);
 }
 
-function editEquipment(id) {
-    const eq = Store.getEquipment().find(e => e.id === id);
+async function editEquipment(id) {
+    const list = await Store.getEquipment();
+    const eq = list.find(e => e.id === id);
     if (!eq) return;
     openModal('Редактировать', equipmentFormHtml(eq),
-        `<button class="btn-primary" onclick="saveEditEquipment('${id}')">Сохранить</button>
-         <button class="btn-danger" onclick="if(confirm('Удалить оборудование?')){Store.deleteEquipment('${id}');closeModal();renderEquipment();renderDashboard();}">Удалить</button>
+        `<button class="btn-primary" onclick="saveEditEquipment(${id})">Сохранить</button>
+         <button class="btn-danger" onclick="confirmDeleteEquipment(${id})">Удалить</button>
          <button class="btn-secondary" onclick="closeModal()">Отмена</button>`
     );
 }
 
-function saveEditEquipment(id) {
+async function confirmDeleteEquipment(id) {
+    if (!confirm('Удалить оборудование?')) return;
+    await Store.deleteEquipment(id);
+    closeModal();
+    await Promise.all([renderEquipment(), renderDashboard(), refreshCaches()]);
+}
+
+async function saveEditEquipment(id) {
     const name = document.getElementById('eqName').value.trim();
     if (!name) { alert('Введите название'); return; }
-    Store.updateEquipment(id, {
+    await Store.updateEquipment(id, {
         name,
         inventoryNo: document.getElementById('eqInvNo').value.trim(),
         status: document.getElementById('eqStatus').value,
         note: document.getElementById('eqNote').value.trim(),
     });
     closeModal();
-    renderEquipment();
-    renderDashboard();
+    await Promise.all([renderEquipment(), renderDashboard(), refreshCaches()]);
 }
 
 document.addEventListener('DOMContentLoaded', () => {

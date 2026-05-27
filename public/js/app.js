@@ -1,4 +1,6 @@
 let currentDate = new Date();
+let _employeesCache = [];
+let _equipmentCache = [];
 
 function formatDate(d) {
     const y = d.getFullYear();
@@ -48,20 +50,21 @@ document.getElementById('modalOverlay').addEventListener('click', (e) => {
 });
 
 function getEmployeeName(id) {
-    const emp = Store.getEmployees().find(e => e.id === id);
+    const emp = _employeesCache.find(e => e.id === id);
     return emp ? emp.name : 'Неизвестный';
 }
 
 function getEquipmentName(id) {
-    const eq = Store.getEquipment().find(e => e.id === id);
+    const eq = _equipmentCache.find(e => e.id === id);
     return eq ? eq.name : '—';
 }
 
-// Init
-document.addEventListener('DOMContentLoaded', () => {
-    Store.load();
-    Store.seedDemoData();
+async function refreshCaches() {
+    _employeesCache = await Store.getEmployees();
+    _equipmentCache = await Store.getEquipment();
+}
 
+document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('headerDate').textContent = formatDateRu(new Date());
 
     document.getElementById('btnSettings').addEventListener('click', () => {
@@ -69,13 +72,12 @@ document.addEventListener('DOMContentLoaded', () => {
             `<div class="form-group">
                 <label>Данные приложения</label>
                 <p style="font-size:13px;color:var(--gray-500);margin-bottom:10px;">
-                    Все данные хранятся локально в браузере.
+                    Данные хранятся в базе данных PostgreSQL на сервере.
                 </p>
             </div>`,
-            `<button class="btn-danger" onclick="if(confirm('Удалить все данные?')){localStorage.clear();location.reload();}">Очистить данные</button>
-             <button class="btn-secondary" onclick="closeModal()">Закрыть</button>`
+            `<button class="btn-secondary" onclick="closeModal()">Закрыть</button>`
         );
     });
 
-    switchTab('dashboard');
+    refreshCaches().then(() => switchTab('dashboard'));
 });

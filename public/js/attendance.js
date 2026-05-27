@@ -7,12 +7,14 @@ const ATT_STATUSES = {
     vacation: 'Отпуск',
 };
 
-function renderAttendance() {
+async function renderAttendance() {
     const dateStr = formatDate(attendanceDate);
     document.getElementById('attendanceDate').textContent = formatDateRu(attendanceDate);
 
-    const employees = Store.getEmployees();
-    const attendance = Store.getAttendance(dateStr);
+    const [employees, attendance] = await Promise.all([
+        Store.getEmployees(),
+        Store.getAttendance(dateStr),
+    ]);
 
     const counts = { present: 0, absent: 0, sick: 0, vacation: 0 };
     employees.forEach(emp => {
@@ -43,7 +45,7 @@ function renderAttendance() {
                     <div class="att-name">${emp.name}</div>
                     <div class="att-position">${emp.position}${emp.grade ? ', ' + emp.grade : ''}</div>
                 </div>
-                <select class="att-status-select" onchange="updateAttendance('${dateStr}','${emp.id}',this.value)">
+                <select class="att-status-select" onchange="updateAttendance('${dateStr}',${emp.id},this.value)">
                     ${Object.entries(ATT_STATUSES).map(([k,v]) =>
                         `<option value="${k}" ${status === k ? 'selected' : ''}>${v}</option>`
                     ).join('')}
@@ -53,9 +55,8 @@ function renderAttendance() {
     }).join('');
 }
 
-function updateAttendance(date, empId, status) {
-    Store.setAttendance(date, empId, status);
-    renderAttendance();
+async function updateAttendance(date, empId, status) {
+    await Store.setAttendance(date, empId, status);
     renderDashboard();
 }
 
@@ -78,18 +79,17 @@ function showAddEmployee() {
     );
 }
 
-function saveNewEmployee() {
+async function saveNewEmployee() {
     const name = document.getElementById('empName').value.trim();
     const position = document.getElementById('empPosition').value.trim();
     if (!name) { alert('Введите ФИО'); return; }
-    Store.addEmployee({
+    await Store.addEmployee({
         name,
         position,
         grade: document.getElementById('empGrade').value.trim(),
     });
     closeModal();
-    renderAttendance();
-    renderDashboard();
+    await Promise.all([renderAttendance(), renderDashboard(), refreshCaches()]);
 }
 
 document.addEventListener('DOMContentLoaded', () => {

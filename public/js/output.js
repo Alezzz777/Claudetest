@@ -1,11 +1,13 @@
 let outputDate = new Date();
 
-function renderOutput() {
+async function renderOutput() {
     const dateStr = formatDate(outputDate);
     document.getElementById('outputDate').textContent = formatDateRu(outputDate);
 
-    const entries = Store.getOutput(dateStr);
-    const employees = Store.getEmployees();
+    const [entries] = await Promise.all([
+        Store.getOutput(dateStr),
+        refreshCaches(),
+    ]);
 
     const totalQty = entries.reduce((sum, e) => sum + Number(e.qty), 0);
     const uniqueEmployees = new Set(entries.map(e => e.employeeId)).size;
@@ -33,16 +35,16 @@ function renderOutput() {
                 <span>${getEquipmentName(entry.equipment)}</span>
             </div>
             <div class="output-card-actions">
-                <button class="btn-edit" onclick="editOutput('${dateStr}','${entry.id}')">Изменить</button>
-                <button class="btn-delete" onclick="deleteOutputEntry('${dateStr}','${entry.id}')">Удалить</button>
+                <button class="btn-edit" onclick="editOutput('${dateStr}',${entry.id})">Изменить</button>
+                <button class="btn-delete" onclick="deleteOutputEntry('${dateStr}',${entry.id})">Удалить</button>
             </div>
         </div>
     `).join('');
 }
 
 function outputFormHtml(entry) {
-    const employees = Store.getEmployees();
-    const equipment = Store.getEquipment();
+    const employees = _employeesCache;
+    const equipment = _equipmentCache;
     const s = entry || { employeeId: '', product: '', qty: '', unit: 'шт', equipment: '' };
 
     return `
@@ -81,7 +83,8 @@ function outputFormHtml(entry) {
     `;
 }
 
-function showAddOutput() {
+async function showAddOutput() {
+    await refreshCaches();
     const dateStr = formatDate(outputDate);
     openModal('Записать выработку', outputFormHtml(),
         `<button class="btn-primary" onclick="saveNewOutput('${dateStr}')">Записать</button>
@@ -89,60 +92,58 @@ function showAddOutput() {
     );
 }
 
-function saveNewOutput(dateStr) {
-    const employeeId = document.getElementById('outEmployee').value;
+async function saveNewOutput(dateStr) {
+    const employeeId = Number(document.getElementById('outEmployee').value);
     const product = document.getElementById('outProduct').value.trim();
     const qty = Number(document.getElementById('outQty').value);
     if (!employeeId) { alert('Выберите сотрудника'); return; }
     if (!product) { alert('Введите наименование продукции'); return; }
     if (!qty || qty <= 0) { alert('Введите количество'); return; }
 
-    Store.addOutput(dateStr, {
+    await Store.addOutput(dateStr, {
         employeeId,
         product,
         qty,
         unit: document.getElementById('outUnit').value,
-        equipment: document.getElementById('outEquipment').value,
+        equipment: document.getElementById('outEquipment').value || null,
     });
     closeModal();
-    renderOutput();
-    renderDashboard();
+    await Promise.all([renderOutput(), renderDashboard()]);
 }
 
-function editOutput(dateStr, id) {
-    const entries = Store.getOutput(dateStr);
+async function editOutput(dateStr, id) {
+    await refreshCaches();
+    const entries = await Store.getOutput(dateStr);
     const entry = entries.find(e => e.id === id);
     if (!entry) return;
 
     openModal('Редактировать', outputFormHtml(entry),
-        `<button class="btn-primary" onclick="saveEditOutput('${dateStr}','${id}')">Сохранить</button>
+        `<button class="btn-primary" onclick="saveEditOutput('${dateStr}',${id})">Сохранить</button>
          <button class="btn-secondary" onclick="closeModal()">Отмена</button>`
     );
 }
 
-function saveEditOutput(dateStr, id) {
-    const employeeId = document.getElementById('outEmployee').value;
+async function saveEditOutput(dateStr, id) {
+    const employeeId = Number(document.getElementById('outEmployee').value);
     const product = document.getElementById('outProduct').value.trim();
     const qty = Number(document.getElementById('outQty').value);
     if (!employeeId || !product || !qty) { alert('Заполните все поля'); return; }
 
-    Store.updateOutput(dateStr, id, {
+    await Store.updateOutput(dateStr, id, {
         employeeId,
         product,
         qty,
         unit: document.getElementById('outUnit').value,
-        equipment: document.getElementById('outEquipment').value,
+        equipment: document.getElementById('outEquipment').value || null,
     });
     closeModal();
-    renderOutput();
-    renderDashboard();
+    await Promise.all([renderOutput(), renderDashboard()]);
 }
 
-function deleteOutputEntry(dateStr, id) {
+async function deleteOutputEntry(dateStr, id) {
     if (!confirm('Удалить запись?')) return;
-    Store.deleteOutput(dateStr, id);
-    renderOutput();
-    renderDashboard();
+    await Store.deleteOutput(dateStr, id);
+    await Promise.all([renderOutput(), renderDashboard()]);
 }
 
 document.addEventListener('DOMContentLoaded', () => {

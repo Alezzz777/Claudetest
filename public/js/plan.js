@@ -1,11 +1,13 @@
 let planDate = new Date();
 
-function renderPlan() {
+async function renderPlan() {
     const dateStr = formatDate(planDate);
     document.getElementById('planDate').textContent = formatDateRu(planDate);
 
-    const items = Store.getPlanItems();
-    const facts = Store.getPlanFact(dateStr);
+    const [items, facts] = await Promise.all([
+        Store.getPlanItems(),
+        Store.getPlanFact(dateStr),
+    ]);
 
     let totalPlan = 0;
     let totalFact = 0;
@@ -57,18 +59,20 @@ function renderPlan() {
                     <span>Остаток: <strong>${Math.max(item.planQty - fact, 0)} ${item.unit}</strong></span>
                 </div>
                 <div class="plan-card-actions">
-                    <button class="btn-fact" onclick="addFactQty('${dateStr}','${item.id}')">Внести факт</button>
-                    <button class="btn-edit" onclick="editPlanItem('${item.id}')">Изм.</button>
-                    <button class="btn-delete" onclick="deletePlanItemConfirm('${item.id}')">Уд.</button>
+                    <button class="btn-fact" onclick="addFactQty('${dateStr}',${item.id})">Внести факт</button>
+                    <button class="btn-edit" onclick="editPlanItem(${item.id})">Изм.</button>
+                    <button class="btn-delete" onclick="deletePlanItemConfirm(${item.id})">Уд.</button>
                 </div>
             </div>
         `;
     }).join('');
 }
 
-function addFactQty(dateStr, itemId) {
-    const item = Store.getPlanItems().find(e => e.id === itemId);
-    const currentFact = Number(Store.getPlanFact(dateStr)[itemId] || 0);
+async function addFactQty(dateStr, itemId) {
+    const items = await Store.getPlanItems();
+    const item = items.find(e => e.id === itemId);
+    const facts = await Store.getPlanFact(dateStr);
+    const currentFact = Number(facts[itemId] || 0);
     if (!item) return;
 
     openModal('Внести факт: ' + item.name,
@@ -76,7 +80,7 @@ function addFactQty(dateStr, itemId) {
             <label>Текущий факт: ${currentFact} ${item.unit} из ${item.planQty} ${item.unit}</label>
             <input id="factQty" type="number" inputmode="numeric" value="${currentFact}" placeholder="0">
         </div>`,
-        `<button class="btn-primary" onclick="saveFactQty('${dateStr}','${itemId}')">Сохранить</button>
+        `<button class="btn-primary" onclick="saveFactQty('${dateStr}',${itemId})">Сохранить</button>
          <button class="btn-secondary" onclick="closeModal()">Отмена</button>`
     );
     setTimeout(() => {
@@ -85,13 +89,12 @@ function addFactQty(dateStr, itemId) {
     }, 300);
 }
 
-function saveFactQty(dateStr, itemId) {
+async function saveFactQty(dateStr, itemId) {
     const qty = Number(document.getElementById('factQty').value);
     if (isNaN(qty) || qty < 0) { alert('Введите корректное количество'); return; }
-    Store.setPlanFact(dateStr, itemId, qty);
+    await Store.setPlanFact(dateStr, itemId, qty);
     closeModal();
-    renderPlan();
-    renderDashboard();
+    await Promise.all([renderPlan(), renderDashboard()]);
 }
 
 function showAddPlanItem() {
@@ -117,23 +120,23 @@ function showAddPlanItem() {
     );
 }
 
-function saveNewPlanItem() {
+async function saveNewPlanItem() {
     const name = document.getElementById('planItemName').value.trim();
     const planQty = Number(document.getElementById('planItemQty').value);
     if (!name) { alert('Введите наименование'); return; }
     if (!planQty || planQty <= 0) { alert('Введите плановое количество'); return; }
-    Store.addPlanItem({
+    await Store.addPlanItem({
         name,
         planQty,
         unit: document.getElementById('planItemUnit').value,
     });
     closeModal();
-    renderPlan();
-    renderDashboard();
+    await Promise.all([renderPlan(), renderDashboard()]);
 }
 
-function editPlanItem(id) {
-    const item = Store.getPlanItems().find(e => e.id === id);
+async function editPlanItem(id) {
+    const items = await Store.getPlanItems();
+    const item = items.find(e => e.id === id);
     if (!item) return;
     openModal('Редактировать номенклатуру',
         `<div class="form-group">
@@ -154,30 +157,28 @@ function editPlanItem(id) {
                 </select>
             </div>
         </div>`,
-        `<button class="btn-primary" onclick="saveEditPlanItem('${id}')">Сохранить</button>
+        `<button class="btn-primary" onclick="saveEditPlanItem(${id})">Сохранить</button>
          <button class="btn-secondary" onclick="closeModal()">Отмена</button>`
     );
 }
 
-function saveEditPlanItem(id) {
+async function saveEditPlanItem(id) {
     const name = document.getElementById('planItemName').value.trim();
     const planQty = Number(document.getElementById('planItemQty').value);
     if (!name || !planQty) { alert('Заполните все поля'); return; }
-    Store.updatePlanItem(id, {
+    await Store.updatePlanItem(id, {
         name,
         planQty,
         unit: document.getElementById('planItemUnit').value,
     });
     closeModal();
-    renderPlan();
-    renderDashboard();
+    await Promise.all([renderPlan(), renderDashboard()]);
 }
 
-function deletePlanItemConfirm(id) {
+async function deletePlanItemConfirm(id) {
     if (!confirm('Удалить номенклатуру?')) return;
-    Store.deletePlanItem(id);
-    renderPlan();
-    renderDashboard();
+    await Store.deletePlanItem(id);
+    await Promise.all([renderPlan(), renderDashboard()]);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
