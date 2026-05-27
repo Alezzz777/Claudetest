@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#1a56db">
+    <title>Мастер участка</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="manifest" href="manifest.json">
+</head>
+<body>
+    <header class="app-header">
+        <div class="header-left">
+            <h1 class="app-title">Мастер участка</h1>
+        </div>
+        <div class="header-right">
+            <span class="header-date" id="headerDate"></span>
+            <button class="btn-icon" id="btnSettings" title="Настройки">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </button>
+        </div>
+    </header>
+
+    <main class="app-content" id="appContent">
+        <!-- Dashboard -->
+        <section class="page active" id="pageDashboard">
+            <div class="dashboard-grid">
+                <div class="dash-card dash-equipment" onclick="switchTab('equipment')">
+                    <div class="dash-card-icon">
+                        <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                    </div>
+                    <div class="dash-card-info">
+                        <span class="dash-card-value" id="dashEquipWorking">0</span>
+                        <span class="dash-card-label">Оборудование в работе</span>
+                    </div>
+                </div>
+                <div class="dash-card dash-attendance" onclick="switchTab('attendance')">
+                    <div class="dash-card-icon">
+                        <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                    </div>
+                    <div class="dash-card-info">
+                        <span class="dash-card-value" id="dashAttendance">0/0</span>
+                        <span class="dash-card-label">Явка сотрудников</span>
+                    </div>
+                </div>
+                <div class="dash-card dash-output" onclick="switchTab('output')">
+                    <div class="dash-card-icon">
+                        <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                    </div>
+                    <div class="dash-card-info">
+                        <span class="dash-card-value" id="dashOutputTotal">0</span>
+                        <span class="dash-card-label">Выработка за смену</span>
+                    </div>
+                </div>
+                <div class="dash-card dash-plan" onclick="switchTab('plan')">
+                    <div class="dash-card-icon">
+                        <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    </div>
+                    <div class="dash-card-info">
+                        <span class="dash-card-value" id="dashPlanPercent">0%</span>
+                        <span class="dash-card-label">Выполнение плана</span>
+                    </div>
+                </div>
+            </div>
+            <div class="section-header">
+                <h2>Сводка за смену</h2>
+                <select id="shiftSelect" class="shift-select">
+                    <option value="day">Дневная смена</option>
+                    <option value="night">Ночная смена</option>
+                </select>
+            </div>
+            <div class="summary-list" id="summaryList"></div>
+        </section>
+
+        <!-- Equipment -->
+        <section class="page" id="pageEquipment">
+            <div class="page-header">
+                <h2>Оборудование</h2>
+                <button class="btn-primary btn-sm" id="btnAddEquipment">+ Добавить</button>
+            </div>
+            <div class="filter-bar">
+                <button class="filter-btn active" data-filter="all">Все</button>
+                <button class="filter-btn" data-filter="working">В работе</button>
+                <button class="filter-btn" data-filter="idle">Простой</button>
+                <button class="filter-btn" data-filter="maintenance">Ремонт</button>
+                <button class="filter-btn" data-filter="broken">Авария</button>
+            </div>
+            <div class="equipment-list" id="equipmentList"></div>
+        </section>
+
+        <!-- Attendance -->
+        <section class="page" id="pageAttendance">
+            <div class="page-header">
+                <h2>Явка сотрудников</h2>
+                <button class="btn-primary btn-sm" id="btnAddEmployee">+ Сотрудник</button>
+            </div>
+            <div class="date-nav">
+                <button class="btn-icon" id="btnPrevDate">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+                </button>
+                <span class="current-date" id="attendanceDate"></span>
+                <button class="btn-icon" id="btnNextDate">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                </button>
+            </div>
+            <div class="attendance-summary" id="attendanceSummary"></div>
+            <div class="attendance-list" id="attendanceList"></div>
+        </section>
+
+        <!-- Output -->
+        <section class="page" id="pageOutput">
+            <div class="page-header">
+                <h2>Выработка</h2>
+                <button class="btn-primary btn-sm" id="btnAddOutput">+ Записать</button>
+            </div>
+            <div class="date-nav">
+                <button class="btn-icon" id="btnPrevOutputDate">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+                </button>
+                <span class="current-date" id="outputDate"></span>
+                <button class="btn-icon" id="btnNextOutputDate">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                </button>
+            </div>
+            <div class="output-total-bar" id="outputTotalBar"></div>
+            <div class="output-list" id="outputList"></div>
+        </section>
+
+        <!-- Plan -->
+        <section class="page" id="pagePlan">
+            <div class="page-header">
+                <h2>План / Факт</h2>
+                <button class="btn-primary btn-sm" id="btnAddPlanItem">+ Номенклатура</button>
+            </div>
+            <div class="date-nav">
+                <button class="btn-icon" id="btnPrevPlanDate">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+                </button>
+                <span class="current-date" id="planDate"></span>
+                <button class="btn-icon" id="btnNextPlanDate">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                </button>
+            </div>
+            <div class="plan-overall" id="planOverall"></div>
+            <div class="plan-list" id="planList"></div>
+        </section>
+    </main>
+
+    <!-- Bottom Navigation -->
+    <nav class="bottom-nav">
+        <button class="nav-btn active" data-page="dashboard" onclick="switchTab('dashboard')">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            <span>Главная</span>
+        </button>
+        <button class="nav-btn" data-page="equipment" onclick="switchTab('equipment')">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+            <span>Оборудование</span>
+        </button>
+        <button class="nav-btn" data-page="attendance" onclick="switchTab('attendance')">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            <span>Явка</span>
+        </button>
+        <button class="nav-btn" data-page="output" onclick="switchTab('output')">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            <span>Выработка</span>
+        </button>
+        <button class="nav-btn" data-page="plan" onclick="switchTab('plan')">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+            <span>План</span>
+        </button>
+    </nav>
+
+    <!-- Modal Template -->
+    <div class="modal-overlay" id="modalOverlay">
+        <div class="modal" id="modal">
+            <div class="modal-header">
+                <h3 id="modalTitle"></h3>
+                <button class="btn-icon modal-close" onclick="closeModal()">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+            <div class="modal-body" id="modalBody"></div>
+            <div class="modal-footer" id="modalFooter"></div>
+        </div>
+    </div>
+
+    <script src="js/store.js"></script>
+    <script src="js/app.js"></script>
+    <script src="js/equipment.js"></script>
+    <script src="js/attendance.js"></script>
+    <script src="js/output.js"></script>
+    <script src="js/plan.js"></script>
+    <script src="js/dashboard.js"></script>
+</body>
+</html>

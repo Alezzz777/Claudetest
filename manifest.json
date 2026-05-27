@@ -1,0 +1,11 @@
+{
+    "name": "Мастер участка",
+    "short_name": "Мастер",
+    "description": "Учёт работы оборудования, явки и выработки сотрудников, план-факт производства",
+    "start_url": "/index.html",
+    "display": "standalone",
+    "background_color": "#f3f4f6",
+    "theme_color": "#1a56db",
+    "orientation": "portrait",
+    "icons": []
+}
