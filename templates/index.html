@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Семейное Древо</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <header>
+        <div class="header-content">
+            <h1>&#127795; Семейное Древо</h1>
+            <button class="menu-toggle" id="menuToggle">&#9776;</button>
+        </div>
+        <nav id="mainNav" class="nav-closed">
+            <button class="nav-btn active" data-tab="tree">Дерево</button>
+            <button class="nav-btn" data-tab="persons">Персоны</button>
+            <button class="nav-btn" data-tab="families">Семьи</button>
+            <button class="nav-btn" data-tab="import-export">Импорт/Экспорт</button>
+        </nav>
+    </header>
+
+    <main>
+        <!-- Tree View -->
+        <section id="tab-tree" class="tab-content active">
+            <div class="toolbar">
+                <select id="treeRootSelect" class="select-input">
+                    <option value="">Выберите корневую персону...</option>
+                </select>
+                <div class="zoom-controls">
+                    <button id="zoomIn" class="icon-btn" title="Увеличить">+</button>
+                    <button id="zoomOut" class="icon-btn" title="Уменьшить">&minus;</button>
+                    <button id="zoomReset" class="icon-btn" title="Сбросить">&#8634;</button>
+                </div>
+            </div>
+            <div id="treeContainer" class="tree-container">
+                <div id="treeCanvas" class="tree-canvas">
+                    <div class="tree-empty-state">
+                        <p>&#127795; Добавьте персон и семьи, затем выберите корневую персону для отображения дерева</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Persons List -->
+        <section id="tab-persons" class="tab-content">
+            <div class="toolbar">
+                <input type="search" id="personSearch" placeholder="Поиск..." class="search-input">
+                <button id="addPersonBtn" class="btn btn-primary">+ Добавить</button>
+            </div>
+            <div id="personsList" class="cards-list"></div>
+        </section>
+
+        <!-- Families List -->
+        <section id="tab-families" class="tab-content">
+            <div class="toolbar">
+                <button id="addFamilyBtn" class="btn btn-primary">+ Создать семью</button>
+            </div>
+            <div id="familiesList" class="cards-list"></div>
+        </section>
+
+        <!-- Import/Export -->
+        <section id="tab-import-export" class="tab-content">
+            <div class="ie-section">
+                <h2>Импорт GEDCOM</h2>
+                <p>Загрузите файл .ged для импорта генеалогических данных</p>
+                <div class="file-upload-area" id="dropZone">
+                    <input type="file" id="gedcomFile" accept=".ged,.gedcom" hidden>
+                    <p>&#128193; Нажмите или перетащите файл сюда</p>
+                    <span class="file-name" id="fileName"></span>
+                </div>
+                <button id="importBtn" class="btn btn-primary btn-full" disabled>Импортировать</button>
+                <div id="importResult" class="result-message"></div>
+            </div>
+            <div class="ie-section">
+                <h2>Экспорт GEDCOM</h2>
+                <p>Скачайте все данные в формате GEDCOM 5.5.1</p>
+                <button id="exportBtn" class="btn btn-secondary btn-full">&#128190; Экспортировать</button>
+            </div>
+            <div class="ie-section danger-zone">
+                <h2>Опасная зона</h2>
+                <button id="clearAllBtn" class="btn btn-danger btn-full">&#128465; Удалить все данные</button>
+            </div>
+        </section>
+    </main>
+
+    <!-- Person Modal -->
+    <div class="modal-overlay" id="personModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 id="personModalTitle">Добавить персону</h2>
+                <button class="modal-close" id="closePersonModal">&times;</button>
+            </div>
+            <form id="personForm" class="modal-body">
+                <input type="hidden" id="personId">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Имя *</label>
+                        <input type="text" id="firstName" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Фамилия</label>
+                        <input type="text" id="lastName">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Девичья фамилия</label>
+                        <input type="text" id="maidenName">
+                    </div>
+                    <div class="form-group">
+                        <label>Пол</label>
+                        <select id="gender">
+                            <option value="U">Не указан</option>
+                            <option value="M">Мужской</option>
+                            <option value="F">Женский</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Дата рождения</label>
+                        <input type="text" id="birthDate" placeholder="01.01.1990">
+                    </div>
+                    <div class="form-group">
+                        <label>Место рождения</label>
+                        <input type="text" id="birthPlace">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Дата смерти</label>
+                        <input type="text" id="deathDate" placeholder="">
+                    </div>
+                    <div class="form-group">
+                        <label>Место смерти</label>
+                        <input type="text" id="deathPlace">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Заметки</label>
+                    <textarea id="notes" rows="3"></textarea>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" id="cancelPersonBtn">Отмена</button>
+                    <button type="submit" class="btn btn-primary">Сохранить</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Family Modal -->
+    <div class="modal-overlay" id="familyModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 id="familyModalTitle">Создать семью</h2>
+                <button class="modal-close" id="closeFamilyModal">&times;</button>
+            </div>
+            <form id="familyForm" class="modal-body">
+                <input type="hidden" id="familyId">
+                <div class="form-group">
+                    <label>Муж</label>
+                    <select id="husbandSelect" class="select-input">
+                        <option value="">-- Не выбран --</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Жена</label>
+                    <select id="wifeSelect" class="select-input">
+                        <option value="">-- Не выбрана --</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Дата брака</label>
+                        <input type="text" id="marriageDate" placeholder="">
+                    </div>
+                    <div class="form-group">
+                        <label>Место брака</label>
+                        <input type="text" id="marriagePlace">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Дата развода</label>
+                    <input type="text" id="divorceDate" placeholder="">
+                </div>
+                <div class="form-group">
+                    <label>Дети</label>
+                    <div id="childrenCheckboxes" class="checkbox-list"></div>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" id="cancelFamilyBtn">Отмена</button>
+                    <button type="submit" class="btn btn-primary">Сохранить</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" class="toast"></div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
