@@ -1,90 +1,211 @@
 import { v4 as uuidv4 } from 'uuid';
 import { EventEnvelope, createEventEnvelope, MesEventType } from '@mes/shared';
 
-export type LotStatus = 'AVAILABLE' | 'RESERVED' | 'IN_USE' | 'CONSUMED' | 'SCRAPPED' | 'ON_HOLD';
+export type LotStatus = 'AVAILABLE' | 'RESERVED' | 'CONSUMED' | 'MOVED';
 
 export interface LotCreatedPayload {
   lotId: string;
-  lotNumber: string;
-  materialId: string;
+  lotNo: string;
   materialCode: string;
   quantity: number;
-  uom: string;
   locationId: string;
-  orderId: string | null;
   tenantId: string;
   createdAt: string;
+}
+
+export interface LotReservedPayload {
+  lotId: string;
+  orderId: string;
+  qty: number;
+}
+
+export interface LotReleasedPayload {
+  lotId: string;
+  orderId: string;
 }
 
 export interface LotMovedPayload {
   lotId: string;
   fromLocationId: string;
   toLocationId: string;
-  quantity: number;
   movedBy: string;
   movedAt: string;
-  reason: string;
 }
 
 export interface LotConsumedPayload {
   lotId: string;
   orderId: string;
-  operationId: string;
-  quantityConsumed: number;
+  qty: number;
+  consumedBy: string;
   remainingQuantity: number;
   consumedAt: string;
 }
 
-/**
- * MaterialLot aggregate — tracks a discrete lot of WIP material through the plant.
- * Full traceability: every movement, consumption and hold is recorded as an event.
- */
 export class MaterialLotAggregate {
   private _id: string;
-  private _lotNumber: string = '';
-  private _materialId: string = '';
-  private _quantity: number = 0;
-  private _locationId: string = '';
-  private _status: LotStatus = 'AVAILABLE';
+  _lotNo: string = '';
+  _materialCode: string = '';
+  _quantity: number = 0;
+  _reservedQty: number = 0;
+  _locationId: string = '';
+  _status: LotStatus = 'AVAILABLE';
+  _tenantId: string = '';
   private _sequence: number = 0;
-  private _uncommitted: EventEnvelope[] = [];
+  _uncommittedEvents: EventEnvelope[] = [];
 
   constructor(id: string) { this._id = id; }
 
-  static create(params: { lotNumber: string; materialId: string; materialCode: string; quantity: number; uom: string; locationId: string; orderId: string | null; tenantId: string; correlationId?: string }): MaterialLotAggregate {
+  static create(params: {
+    lotNo: string;
+    materialCode: string;
+    quantity: number;
+    locationId: string;
+    tenantId: string;
+    correlationId?: string;
+  }): MaterialLotAggregate {
     const id = uuidv4();
     const agg = new MaterialLotAggregate(id);
-    const payload: LotCreatedPayload = { lotId: id, lotNumber: params.lotNumber, materialId: params.materialId, materialCode: params.materialCode, quantity: params.quantity, uom: params.uom, locationId: params.locationId, orderId: params.orderId, tenantId: params.tenantId, createdAt: new Date().toISOString() };
-    agg.applyAndRecord(createEventEnvelope({ type: MesEventType.INVENTORY_LOT_CREATED, source: 'urn:mes:inventory-service:MaterialLot', aggregateId: id, aggregateType: 'MaterialLot', sequence: 1, data: payload, correlationId: params.correlationId }));
+    const payload: LotCreatedPayload = {
+      lotId: id,
+      lotNo: params.lotNo,
+      materialCode: params.materialCode,
+      quantity: params.quantity,
+      locationId: params.locationId,
+      tenantId: params.tenantId,
+      createdAt: new Date().toISOString(),
+    };
+    agg._applyAndRecord(createEventEnvelope({
+      type: MesEventType.INVENTORY_LOT_CREATED,
+      source: 'urn:mes:inventory-service:MaterialLot',
+      aggregateId: id,
+      aggregateType: 'MaterialLot',
+      sequence: 1,
+      data: payload,
+      correlationId: params.correlationId,
+    }));
     return agg;
   }
 
-  move(toLocationId: string, quantity: number, movedBy: string, reason: string, correlationId?: string): void {
-    if (this._status === 'CONSUMED' || this._status === 'SCRAPPED') throw new Error(`Cannot move lot in status ${this._status}`);
-    const payload: LotMovedPayload = { lotId: this._id, fromLocationId: this._locationId, toLocationId, quantity, movedBy, movedAt: new Date().toISOString(), reason };
-    this.applyAndRecord(createEventEnvelope({ type: MesEventType.INVENTORY_LOT_MOVED, source: 'urn:mes:inventory-service:MaterialLot', aggregateId: this._id, aggregateType: 'MaterialLot', sequence: this._sequence + 1, data: payload, correlationId }));
-  }
-
-  consume(orderId: string, operationId: string, quantity: number, correlationId?: string): void {
-    if (quantity > this._quantity) throw new Error(`Cannot consume ${quantity}; only ${this._quantity} available`);
-    const remaining = this._quantity - quantity;
-    const payload: LotConsumedPayload = { lotId: this._id, orderId, operationId, quantityConsumed: quantity, remainingQuantity: remaining, consumedAt: new Date().toISOString() };
-    this.applyAndRecord(createEventEnvelope({ type: MesEventType.INVENTORY_LOT_CONSUMED, source: 'urn:mes:inventory-service:MaterialLot', aggregateId: this._id, aggregateType: 'MaterialLot', sequence: this._sequence + 1, data: payload, correlationId }));
-  }
-
-  private applyAndRecord(e: EventEnvelope): void { this.apply(e); this._uncommitted.push(e); }
-
-  apply(e: EventEnvelope): void {
-    this._sequence = e.sequence;
-    if (e.type === MesEventType.INVENTORY_LOT_CREATED) {
-      const d = e.data as LotCreatedPayload;
-      this._lotNumber = d.lotNumber; this._materialId = d.materialId; this._quantity = d.quantity; this._locationId = d.locationId;
+  reserve(orderId: string, qty: number, correlationId?: string): void {
+    if (this._status !== 'AVAILABLE') {
+      throw new Error(`Cannot reserve lot in status ${this._status}`);
     }
-    if (e.type === MesEventType.INVENTORY_LOT_MOVED) { this._locationId = (e.data as LotMovedPayload).toLocationId; }
-    if (e.type === MesEventType.INVENTORY_LOT_CONSUMED) {
-      const d = e.data as LotConsumedPayload;
-      this._quantity = d.remainingQuantity;
-      if (d.remainingQuantity === 0) this._status = 'CONSUMED';
+    if (qty > this._quantity - this._reservedQty) {
+      throw new Error(`Cannot reserve ${qty}; only ${this._quantity - this._reservedQty} available`);
+    }
+    const payload: LotReservedPayload = { lotId: this._id, orderId, qty };
+    this._applyAndRecord(createEventEnvelope({
+      type: MesEventType.INVENTORY_RESERVATION_CREATED,
+      source: 'urn:mes:inventory-service:MaterialLot',
+      aggregateId: this._id,
+      aggregateType: 'MaterialLot',
+      sequence: this._sequence + 1,
+      data: payload,
+      correlationId,
+    }));
+  }
+
+  release(orderId: string, correlationId?: string): void {
+    if (this._status !== 'RESERVED') return;
+    const payload: LotReleasedPayload = { lotId: this._id, orderId };
+    this._applyAndRecord(createEventEnvelope({
+      type: MesEventType.INVENTORY_RESERVATION_FULFILLED,
+      source: 'urn:mes:inventory-service:MaterialLot',
+      aggregateId: this._id,
+      aggregateType: 'MaterialLot',
+      sequence: this._sequence + 1,
+      data: payload,
+      correlationId,
+    }));
+  }
+
+  move(toLocationId: string, movedBy: string, correlationId?: string): void {
+    const payload: LotMovedPayload = {
+      lotId: this._id,
+      fromLocationId: this._locationId,
+      toLocationId,
+      movedBy,
+      movedAt: new Date().toISOString(),
+    };
+    this._applyAndRecord(createEventEnvelope({
+      type: MesEventType.INVENTORY_LOT_MOVED,
+      source: 'urn:mes:inventory-service:MaterialLot',
+      aggregateId: this._id,
+      aggregateType: 'MaterialLot',
+      sequence: this._sequence + 1,
+      data: payload,
+      correlationId,
+    }));
+  }
+
+  consume(orderId: string, qty: number, consumedBy: string, correlationId?: string): void {
+    if (qty > this._quantity - this._reservedQty) {
+      throw new Error(`Cannot consume ${qty}; only ${this._quantity - this._reservedQty} available`);
+    }
+    const remaining = this._quantity - qty;
+    const payload: LotConsumedPayload = {
+      lotId: this._id,
+      orderId,
+      qty,
+      consumedBy,
+      remainingQuantity: remaining,
+      consumedAt: new Date().toISOString(),
+    };
+    this._applyAndRecord(createEventEnvelope({
+      type: MesEventType.INVENTORY_LOT_CONSUMED,
+      source: 'urn:mes:inventory-service:MaterialLot',
+      aggregateId: this._id,
+      aggregateType: 'MaterialLot',
+      sequence: this._sequence + 1,
+      data: payload,
+      correlationId,
+    }));
+  }
+
+  private _applyAndRecord(e: EventEnvelope): void {
+    this.apply(e);
+    this._uncommittedEvents.push(e);
+  }
+
+  apply(event: EventEnvelope): void {
+    this._sequence = event.sequence;
+    switch (event.type) {
+      case MesEventType.INVENTORY_LOT_CREATED: {
+        const d = event.data as LotCreatedPayload;
+        this._lotNo = d.lotNo;
+        this._materialCode = d.materialCode;
+        this._quantity = d.quantity;
+        this._locationId = d.locationId;
+        this._tenantId = d.tenantId;
+        this._status = 'AVAILABLE';
+        break;
+      }
+      case MesEventType.INVENTORY_RESERVATION_CREATED: {
+        const d = event.data as LotReservedPayload;
+        this._reservedQty += d.qty;
+        this._status = 'RESERVED';
+        break;
+      }
+      case MesEventType.INVENTORY_RESERVATION_FULFILLED: {
+        const d = event.data as LotReleasedPayload;
+        void d;
+        this._reservedQty = 0;
+        this._status = 'AVAILABLE';
+        break;
+      }
+      case MesEventType.INVENTORY_LOT_MOVED: {
+        const d = event.data as LotMovedPayload;
+        this._locationId = d.toLocationId;
+        this._status = 'MOVED';
+        break;
+      }
+      case MesEventType.INVENTORY_LOT_CONSUMED: {
+        const d = event.data as LotConsumedPayload;
+        this._quantity = d.remainingQuantity;
+        this._reservedQty = Math.max(0, this._reservedQty - d.qty);
+        if (d.remainingQuantity === 0) this._status = 'CONSUMED';
+        break;
+      }
     }
   }
 
@@ -95,9 +216,18 @@ export class MaterialLotAggregate {
     return agg;
   }
 
+  popUncommittedEvents(): EventEnvelope[] {
+    const events = [...this._uncommittedEvents];
+    this._uncommittedEvents = [];
+    return events;
+  }
+
   get id() { return this._id; }
+  get lotNo() { return this._lotNo; }
+  get materialCode() { return this._materialCode; }
   get quantity() { return this._quantity; }
+  get reservedQty() { return this._reservedQty; }
   get locationId() { return this._locationId; }
   get status() { return this._status; }
-  popUncommittedEvents(): EventEnvelope[] { const e = [...this._uncommitted]; this._uncommitted = []; return e; }
+  get sequence() { return this._sequence; }
 }

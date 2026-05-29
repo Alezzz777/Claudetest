@@ -1,117 +1,129 @@
 import { v4 as uuidv4 } from 'uuid';
 import { EventEnvelope, createEventEnvelope, MesEventType } from '@mes/shared';
 
-export type WorkOrderStatus = 'OPEN' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
+export type EquipmentStatus = 'AVAILABLE' | 'UNDER_MAINTENANCE' | 'DOWN';
 export type WorkOrderType = 'CORRECTIVE' | 'PREVENTIVE' | 'PREDICTIVE';
 
-export interface WorkOrderCreatedPayload {
+export const EQUIPMENT_CREATED_TYPE = 'maintenance.equipment.created';
+export const EQUIPMENT_RUNTIME_UPDATED_TYPE = 'maintenance.equipment.runtime.updated';
+export const EQUIPMENT_THRESHOLD_EXCEEDED_TYPE = 'maintenance.equipment.threshold-exceeded';
+export const EQUIPMENT_DOWN_TYPE = 'maintenance.equipment.down';
+export const EQUIPMENT_RESTORED_TYPE = 'maintenance.equipment.restored';
+
+export interface EquipmentCreatedPayload {
   equipmentId: string;
-  workOrderId: string;
-  workOrderType: WorkOrderType;
-  description: string;
-  priority: number;
-  plannedStartAt: string;
-  assignedTo: string | null;
-  createdBy: string;
-  createdAt: string;
+  name: string;
+  workCenterId: string;
+  maintenanceThresholdHours: number;
+  tenantId: string;
 }
 
 export interface EquipmentRuntimeUpdatedPayload {
   equipmentId: string;
-  cumulativeRuntimeHours: number;
-  cycleCount: number;
-  lastUpdatedAt: string;
-  source: 'OPC_UA' | 'MANUAL' | 'SPARKPLUG';
+  runtimeHours: number;
+  cumulativeRuntimeHours?: number;
+  cycleCount?: number;
 }
 
-/**
- * Equipment aggregate — tracks runtime counters and maintenance work orders.
- * Runtime data comes from integration-service (OPC-UA / Sparkplug telemetry).
- */
+export interface EquipmentDownPayload {
+  equipmentId: string;
+  workOrderId: string;
+}
+
+export interface EquipmentRestoredPayload {
+  equipmentId: string;
+}
+
 export class EquipmentAggregate {
   private _id: string;
-  private _runtimeHours: number = 0;
-  private _cycleCount: number = 0;
-  private _workOrders: string[] = [];
+  _name: string = '';
+  _workCenterId: string = '';
+  _status: EquipmentStatus = 'AVAILABLE';
+  _runtimeHours: number = 0;
+  _maintenanceThresholdHours: number = 0;
+  _tenantId: string = '';
   private _sequence: number = 0;
-  private _uncommitted: EventEnvelope[] = [];
+  _uncommittedEvents: EventEnvelope[] = [];
 
   constructor(id: string) { this._id = id; }
 
-  createWorkOrder(params: {
-    workOrderType: WorkOrderType;
-    description: string;
-    priority: number;
-    plannedStartAt: Date;
-    createdBy: string;
-    correlationId?: string;
-  }): string {
-    const workOrderId = uuidv4();
-    const payload: WorkOrderCreatedPayload = {
-      equipmentId: this._id,
-      workOrderId,
-      workOrderType: params.workOrderType,
-      description: params.description,
-      priority: params.priority,
-      plannedStartAt: params.plannedStartAt.toISOString(),
-      assignedTo: null,
-      createdBy: params.createdBy,
-      createdAt: new Date().toISOString(),
-    };
-    this.applyAndRecord(createEventEnvelope({
-      type: MesEventType.MAINTENANCE_WORK_ORDER_CREATED,
-      source: 'urn:mes:maintenance-service:Equipment',
-      aggregateId: this._id,
-      aggregateType: 'Equipment',
-      sequence: this._sequence + 1,
-      data: payload,
-      correlationId: params.correlationId,
-    }));
-    return workOrderId;
+  static create(params: { name: string; workCenterId: string; maintenanceThresholdHours: number; tenantId: string; correlationId?: string }): EquipmentAggregate {
+    const id = uuidv4();
+    const agg = new EquipmentAggregate(id);
+    const payload: EquipmentCreatedPayload = { equipmentId: id, name: params.name, workCenterId: params.workCenterId, maintenanceThresholdHours: params.maintenanceThresholdHours, tenantId: params.tenantId };
+    const event = createEventEnvelope({ type: EQUIPMENT_CREATED_TYPE, source: 'urn:mes:maintenance-service:Equipment', aggregateId: id, aggregateType: 'Equipment', sequence: 1, data: payload, correlationId: params.correlationId, tenantId: params.tenantId });
+    agg.apply(event);
+    agg._uncommittedEvents.push(event);
+    return agg;
   }
 
-  updateRuntime(runtimeHours: number, cycleCount: number, source: 'OPC_UA' | 'MANUAL' | 'SPARKPLUG', correlationId?: string): void {
-    const payload: EquipmentRuntimeUpdatedPayload = {
-      equipmentId: this._id,
-      cumulativeRuntimeHours: runtimeHours,
-      cycleCount,
-      lastUpdatedAt: new Date().toISOString(),
-      source,
-    };
-    this.applyAndRecord(createEventEnvelope({
-      type: MesEventType.MAINTENANCE_EQUIPMENT_RUNTIME_UPDATED,
-      source: 'urn:mes:maintenance-service:Equipment',
-      aggregateId: this._id,
-      aggregateType: 'Equipment',
-      sequence: this._sequence + 1,
-      data: payload,
-      correlationId,
-    }));
-  }
-
-  private applyAndRecord(e: EventEnvelope): void { this.apply(e); this._uncommitted.push(e); }
-
-  apply(e: EventEnvelope): void {
-    this._sequence = e.sequence;
-    if (e.type === MesEventType.MAINTENANCE_WORK_ORDER_CREATED) {
-      this._workOrders.push((e.data as WorkOrderCreatedPayload).workOrderId);
+  recordRuntime(hours: number, correlationId?: string): void {
+    const previousHours = this._runtimeHours;
+    const newHours = previousHours + hours;
+    const runtimeEvent = createEventEnvelope({ type: EQUIPMENT_RUNTIME_UPDATED_TYPE, source: 'urn:mes:maintenance-service:Equipment', aggregateId: this._id, aggregateType: 'Equipment', sequence: this._sequence + 1, data: { equipmentId: this._id, runtimeHours: newHours } as EquipmentRuntimeUpdatedPayload, correlationId });
+    this.apply(runtimeEvent);
+    this._uncommittedEvents.push(runtimeEvent);
+    if (this._runtimeHours >= this._maintenanceThresholdHours && previousHours < this._maintenanceThresholdHours && this._status === 'AVAILABLE') {
+      const thresholdEvent = createEventEnvelope({ type: EQUIPMENT_THRESHOLD_EXCEEDED_TYPE, source: 'urn:mes:maintenance-service:Equipment', aggregateId: this._id, aggregateType: 'Equipment', sequence: this._sequence + 1, data: { equipmentId: this._id, runtimeHours: this._runtimeHours, threshold: this._maintenanceThresholdHours }, correlationId });
+      this.apply(thresholdEvent);
+      this._uncommittedEvents.push(thresholdEvent);
     }
-    if (e.type === MesEventType.MAINTENANCE_EQUIPMENT_RUNTIME_UPDATED) {
-      const d = e.data as EquipmentRuntimeUpdatedPayload;
-      this._runtimeHours = d.cumulativeRuntimeHours;
-      this._cycleCount = d.cycleCount;
+  }
+
+  setUnderMaintenance(workOrderId: string, correlationId?: string): void {
+    if (this._status === 'UNDER_MAINTENANCE') throw new Error(`Equipment ${this._id} is already under maintenance`);
+    const event = createEventEnvelope({ type: EQUIPMENT_DOWN_TYPE, source: 'urn:mes:maintenance-service:Equipment', aggregateId: this._id, aggregateType: 'Equipment', sequence: this._sequence + 1, data: { equipmentId: this._id, workOrderId } as EquipmentDownPayload, correlationId });
+    this.apply(event);
+    this._uncommittedEvents.push(event);
+  }
+
+  restore(correlationId?: string): void {
+    if (this._status !== 'UNDER_MAINTENANCE' && this._status !== 'DOWN') throw new Error(`Equipment ${this._id} is not under maintenance or down`);
+    const event = createEventEnvelope({ type: EQUIPMENT_RESTORED_TYPE, source: 'urn:mes:maintenance-service:Equipment', aggregateId: this._id, aggregateType: 'Equipment', sequence: this._sequence + 1, data: { equipmentId: this._id } as EquipmentRestoredPayload, correlationId });
+    this.apply(event);
+    this._uncommittedEvents.push(event);
+  }
+
+  apply(event: EventEnvelope): void {
+    this._sequence = event.sequence;
+    switch (event.type) {
+      case EQUIPMENT_CREATED_TYPE: {
+        const d = event.data as EquipmentCreatedPayload;
+        this._id = d.equipmentId;
+        this._name = d.name;
+        this._workCenterId = d.workCenterId;
+        this._maintenanceThresholdHours = d.maintenanceThresholdHours;
+        this._tenantId = d.tenantId;
+        this._status = 'AVAILABLE';
+        break;
+      }
+      case EQUIPMENT_RUNTIME_UPDATED_TYPE: {
+        const d = event.data as EquipmentRuntimeUpdatedPayload;
+        this._runtimeHours = d.runtimeHours;
+        break;
+      }
+      case EQUIPMENT_THRESHOLD_EXCEEDED_TYPE: break;
+      case EQUIPMENT_DOWN_TYPE: this._status = 'UNDER_MAINTENANCE'; break;
+      case EQUIPMENT_RESTORED_TYPE: this._status = 'AVAILABLE'; this._runtimeHours = 0; break;
     }
   }
 
   static rehydrate(events: EventEnvelope[]): EquipmentAggregate {
-    const id = (events[0]?.data as { equipmentId: string })?.equipmentId ?? '';
+    const firstData = events[0]?.data as { equipmentId?: string } | undefined;
+    const id = firstData?.equipmentId ?? (events[0]?.aggregateId ?? '');
     const agg = new EquipmentAggregate(id);
     for (const e of events) agg.apply(e);
     return agg;
   }
 
+  popUncommittedEvents(): EventEnvelope[] { const e = [...this._uncommittedEvents]; this._uncommittedEvents = []; return e; }
+
   get id() { return this._id; }
+  get name() { return this._name; }
+  get status() { return this._status; }
   get runtimeHours() { return this._runtimeHours; }
-  get cycleCount() { return this._cycleCount; }
-  popUncommittedEvents(): EventEnvelope[] { const e = [...this._uncommitted]; this._uncommitted = []; return e; }
+  get sequence() { return this._sequence; }
+  get workCenterId() { return this._workCenterId; }
+  get tenantId() { return this._tenantId; }
+  get maintenanceThresholdHours() { return this._maintenanceThresholdHours; }
 }

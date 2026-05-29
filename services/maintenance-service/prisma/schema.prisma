@@ -2,69 +2,73 @@ generator client { provider = "prisma-client-js" }
 datasource db { provider = "postgresql"; url = env("DATABASE_URL") }
 
 model EventStore {
-  id String @id @default(uuid())
-  aggregateId String
+  id            String   @id @default(uuid())
+  aggregateId   String
   aggregateType String
-  eventType String
-  sequence Int
-  payload Json
-  correlationId String
-  causationId String?
-  createdAt DateTime @default(now())
+  eventType     String
+  sequence      Int
+  payload       Json
+  correlationId String?
+  causationId   String?
+  createdAt     DateTime @default(now())
   @@unique([aggregateId, sequence])
   @@index([aggregateId])
   @@map("event_store")
 }
 
 model Outbox {
-  id String @id
-  eventType String
+  id           String    @id
+  eventType    String
   aggregateType String
-  aggregateId String
-  payload Json
-  topic String
+  aggregateId  String
+  payload      Json
+  topic        String
   partitionKey String
-  status String @default("PENDING")
-  attempts Int @default(0)
-  createdAt DateTime @default(now())
-  processedAt DateTime?
-  lastError String?
+  status       String    @default("PENDING")
+  attempts     Int       @default(0)
+  createdAt    DateTime  @default(now())
+  processedAt  DateTime?
+  lastError    String?
   @@index([status, attempts])
   @@map("outbox")
 }
 
 model ProcessedEvent {
-  eventId String @id
-  processedAt DateTime
+  eventId     String   @id
+  processedAt DateTime @default(now())
   @@map("processed_events")
 }
 
 model EquipmentProjection {
-  equipmentId String @id
-  name String
-  status String
-  runtimeHours Float @default(0)
-  cycleCount Int @default(0)
-  openWorkOrders Int @default(0)
-  nextPmDue DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  equipmentId   String    @id
+  name          String
+  workCenterId  String
+  status        String
+  runtimeHours  Float     @default(0)
+  lastServiceAt DateTime?
+  nextServiceAt DateTime?
+  tenantId      String
+  updatedAt     DateTime  @updatedAt
+  @@index([workCenterId])
+  @@index([status])
   @@map("equipment_projections")
 }
 
 model WorkOrderProjection {
-  workOrderId String @id
-  equipmentId String
-  workOrderType String
-  description String
-  priority Int
-  status String @default("OPEN")
-  assignedTo String?
-  plannedStartAt DateTime
-  actualStartAt DateTime?
-  completedAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  @@index([equipmentId, status])
+  workOrderId  String    @id
+  equipmentId  String
+  workOrderNo  String    @unique
+  type         String
+  status       String
+  description  String
+  assignedTo   String?
+  plannedStart DateTime?
+  plannedEnd   DateTime?
+  actualStart  DateTime?
+  actualEnd    DateTime?
+  createdAt    DateTime
+  updatedAt    DateTime  @updatedAt
+  @@index([equipmentId])
+  @@index([status])
   @@map("work_order_projections")
 }

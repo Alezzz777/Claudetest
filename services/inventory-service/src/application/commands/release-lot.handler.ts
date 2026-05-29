@@ -3,27 +3,28 @@ import { Logger } from '@nestjs/common';
 import { MaterialLotAggregate } from '../../domain/material-lot.aggregate';
 import { EventStoreRepository } from '../../infrastructure/persistence/event-store.repository';
 
-export class MoveLotCommand {
+export class ReleaseLotCommand {
   constructor(
     public readonly lotId: string,
-    public readonly toLocationId: string,
-    public readonly movedBy: string,
+    public readonly orderId: string,
     public readonly correlationId?: string,
   ) {}
 }
 
-@CommandHandler(MoveLotCommand)
-export class MoveLotHandler implements ICommandHandler<MoveLotCommand, void> {
-  private readonly logger = new Logger(MoveLotHandler.name);
+@CommandHandler(ReleaseLotCommand)
+export class ReleaseLotHandler implements ICommandHandler<ReleaseLotCommand, void> {
+  private readonly logger = new Logger(ReleaseLotHandler.name);
 
   constructor(private readonly repo: EventStoreRepository) {}
 
-  async execute(cmd: MoveLotCommand): Promise<void> {
+  async execute(cmd: ReleaseLotCommand): Promise<void> {
     const events = await this.repo.load(cmd.lotId);
     const agg = MaterialLotAggregate.rehydrate(events);
-    agg.move(cmd.toLocationId, cmd.movedBy, cmd.correlationId);
+    agg.release(cmd.orderId, cmd.correlationId);
     const newEvents = agg.popUncommittedEvents();
-    await this.repo.save(agg.id, newEvents, agg.sequence);
-    this.logger.log(`Lot ${cmd.lotId} moved to ${cmd.toLocationId}`);
+    if (newEvents.length > 0) {
+      await this.repo.save(agg.id, newEvents, agg.sequence);
+    }
+    this.logger.log(`Lot ${cmd.lotId} released for order ${cmd.orderId}`);
   }
 }
