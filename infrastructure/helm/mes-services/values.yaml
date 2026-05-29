@@ -1,0 +1,115 @@
+global:
+  imageRegistry: ""
+  imagePullPolicy: Always
+  namespace: mes-platform
+
+kafka:
+  brokers: "kafka-headless.kafka.svc.cluster.local:9092"
+  schemaRegistryUrl: "http://schema-registry.kafka.svc.cluster.local:8081"
+
+keycloak:
+  url: "http://keycloak.auth.svc.cluster.local:8080"
+  realm: "mes"
+
+otel:
+  endpoint: "http://otel-collector.observability.svc.cluster.local:4317"
+
+services:
+  productionService:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: mes-platform/production-service
+      tag: "latest"
+    port: 3001
+    resources:
+      requests: { memory: "256Mi", cpu: "100m" }
+      limits: { memory: "512Mi", cpu: "500m" }
+
+  qualityService:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: mes-platform/quality-service
+      tag: "latest"
+    port: 3002
+    resources:
+      requests: { memory: "256Mi", cpu: "100m" }
+      limits: { memory: "512Mi", cpu: "500m" }
+
+  maintenanceService:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: mes-platform/maintenance-service
+      tag: "latest"
+    port: 3003
+    resources:
+      requests: { memory: "256Mi", cpu: "100m" }
+      limits: { memory: "512Mi", cpu: "500m" }
+
+  inventoryService:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: mes-platform/inventory-service
+      tag: "latest"
+    port: 3004
+    resources:
+      requests: { memory: "256Mi", cpu: "100m" }
+      limits: { memory: "512Mi", cpu: "500m" }
+
+  recipeService:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: mes-platform/recipe-service
+      tag: "latest"
+    port: 3005
+    resources:
+      requests: { memory: "256Mi", cpu: "100m" }
+      limits: { memory: "512Mi", cpu: "500m" }
+
+  schedulingService:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: mes-platform/scheduling-service
+      tag: "latest"
+    port: 3006
+    resources:
+      requests: { memory: "256Mi", cpu: "100m" }
+      limits: { memory: "512Mi", cpu: "500m" }
+
+  integrationService:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: mes-platform/integration-service
+      tag: "latest"
+    port: 3007
+    resources:
+      requests: { memory: "512Mi", cpu: "200m" }
+      limits: { memory: "1Gi", cpu: "1000m" }
+
+  adminService:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: mes-platform/admin-service
+      tag: "latest"
+    port: 3008
+    resources:
+      requests: { memory: "256Mi", cpu: "100m" }
+      limits: { memory: "512Mi", cpu: "500m" }
+
+  webApp:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: mes-platform/web-app
+      tag: "latest"
+    port: 80
+    resources:
+      requests: { memory: "64Mi", cpu: "50m" }
+      limits: { memory: "128Mi", cpu: "200m" }

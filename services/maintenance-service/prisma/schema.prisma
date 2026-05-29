@@ -1,0 +1,70 @@
+generator client { provider = "prisma-client-js" }
+datasource db { provider = "postgresql"; url = env("DATABASE_URL") }
+
+model EventStore {
+  id String @id @default(uuid())
+  aggregateId String
+  aggregateType String
+  eventType String
+  sequence Int
+  payload Json
+  correlationId String
+  causationId String?
+  createdAt DateTime @default(now())
+  @@unique([aggregateId, sequence])
+  @@index([aggregateId])
+  @@map("event_store")
+}
+
+model Outbox {
+  id String @id
+  eventType String
+  aggregateType String
+  aggregateId String
+  payload Json
+  topic String
+  partitionKey String
+  status String @default("PENDING")
+  attempts Int @default(0)
+  createdAt DateTime @default(now())
+  processedAt DateTime?
+  lastError String?
+  @@index([status, attempts])
+  @@map("outbox")
+}
+
+model ProcessedEvent {
+  eventId String @id
+  processedAt DateTime
+  @@map("processed_events")
+}
+
+model EquipmentProjection {
+  equipmentId String @id
+  name String
+  status String
+  runtimeHours Float @default(0)
+  cycleCount Int @default(0)
+  openWorkOrders Int @default(0)
+  nextPmDue DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@map("equipment_projections")
+}
+
+model WorkOrderProjection {
+  workOrderId String @id
+  equipmentId String
+  workOrderType String
+  description String
+  priority Int
+  status String @default("OPEN")
+  assignedTo String?
+  plannedStartAt DateTime
+  actualStartAt DateTime?
+  completedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([equipmentId, status])
+  @@map("work_order_projections")
+}

@@ -1,0 +1,27 @@
+generator client { provider = "prisma-client-js" }
+datasource db { provider = "postgresql"; url = env("DATABASE_URL") }
+
+model EventStore {
+  id String @id @default(uuid()); aggregateId String; aggregateType String; eventType String
+  sequence Int; payload Json; correlationId String; causationId String?; createdAt DateTime @default(now())
+  @@unique([aggregateId, sequence]); @@index([aggregateId]); @@map("event_store")
+}
+model Outbox {
+  id String @id; eventType String; aggregateType String; aggregateId String; payload Json
+  topic String; partitionKey String; status String @default("PENDING"); attempts Int @default(0)
+  createdAt DateTime @default(now()); processedAt DateTime?; lastError String?
+  @@index([status, attempts]); @@map("outbox")
+}
+model ProcessedEvent { eventId String @id; processedAt DateTime; @@map("processed_events") }
+
+model RecipeProjection {
+  recipeId String @id; productCode String @unique; currentVersion String; status String @default("DRAFT")
+  steps Json; createdAt DateTime @default(now()); updatedAt DateTime @updatedAt
+  @@map("recipe_projections")
+}
+
+model RecipeVersionProjection {
+  id String @id @default(uuid()); recipeId String; version String; steps Json
+  publishedBy String; publishedAt DateTime; status String @default("ACTIVE")
+  @@unique([recipeId, version]); @@index([recipeId]); @@map("recipe_version_projections")
+}

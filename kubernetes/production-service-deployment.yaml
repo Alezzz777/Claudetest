@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: production-service
+  namespace: mes-platform
+  labels:
+    app: production-service
+    version: "1.0.0"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: production-service
+  template:
+    metadata:
+      labels:
+        app: production-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3001"
+        prometheus.io/path: "/api/v1/metrics"
+    spec:
+      serviceAccountName: mes-service-account
+      containers:
+        - name: production-service
+          image: mes-platform/production-service:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3001
+              name: http
+          envFrom:
+            - configMapRef:
+                name: mes-common-config
+            - secretRef:
+                name: production-service-secrets
+          env:
+            - name: PORT
+              value: "3001"
+            - name: KAFKA_CLIENT_ID
+              value: "production-service"
+            - name: KAFKA_GROUP_ID
+              value: "production-service-group"
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 3001
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 3001
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: production-service
+  namespace: mes-platform
+spec:
+  selector:
+    app: production-service
+  ports:
+    - port: 3001
+      targetPort: 3001
+      name: http

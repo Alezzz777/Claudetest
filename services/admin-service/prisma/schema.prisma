@@ -1,0 +1,7 @@
+generator client { provider = "prisma-client-js" }
+datasource db { provider = "postgresql"; url = env("DATABASE_URL") }
+model EventStore { id String @id @default(uuid()); aggregateId String; aggregateType String; eventType String; sequence Int; payload Json; correlationId String; causationId String?; createdAt DateTime @default(now()); @@unique([aggregateId, sequence]); @@index([aggregateId]); @@map("event_store") }
+model Outbox { id String @id; eventType String; aggregateType String; aggregateId String; payload Json; topic String; partitionKey String; status String @default("PENDING"); attempts Int @default(0); createdAt DateTime @default(now()); processedAt DateTime?; lastError String?; @@index([status, attempts]); @@map("outbox") }
+model ProcessedEvent { eventId String @id; processedAt DateTime; @@map("processed_events") }
+model UserProjection { userId String @id; email String @unique; displayName String; keycloakId String @unique; roles Json; tenantId String; createdAt DateTime @default(now()); updatedAt DateTime @updatedAt; @@map("user_projections") }
+model AuditLog { id String @id; eventType String; aggregateType String; aggregateId String; correlationId String; source String; payload Json; occurredAt DateTime; @@index([aggregateId]); @@index([occurredAt]); @@map("audit_logs") }
