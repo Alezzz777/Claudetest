@@ -9,11 +9,12 @@ export class GetEquipmentStatusQuery {
 export interface EquipmentStatusReadModel {
   equipmentId: string;
   name: string;
+  workCenterId: string;
   status: string;
   runtimeHours: number;
-  cycleCount: number;
-  openWorkOrders: number;
-  nextPmDue: string | null;
+  lastServiceAt: string | null;
+  nextServiceAt: string | null;
+  tenantId: string;
 }
 
 @QueryHandler(GetEquipmentStatusQuery)
@@ -26,11 +27,12 @@ export class GetEquipmentStatusHandler implements IQueryHandler<GetEquipmentStat
     return {
       equipmentId: row.equipmentId,
       name: row.name,
+      workCenterId: row.workCenterId,
       status: row.status,
       runtimeHours: row.runtimeHours,
-      cycleCount: row.cycleCount,
-      openWorkOrders: row.openWorkOrders,
-      nextPmDue: row.nextPmDue?.toISOString() ?? null,
+      lastServiceAt: row.lastServiceAt?.toISOString() ?? null,
+      nextServiceAt: row.nextServiceAt?.toISOString() ?? null,
+      tenantId: row.tenantId,
     };
   }
 }
