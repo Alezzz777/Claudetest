@@ -1,23 +1,45 @@
-import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { Kafka, Consumer, EachMessagePayload } from 'kafkajs';
-import { EventEnvelope, MesEventType } from '@mes/shared';
-import { RecipePublishedHandler } from '../../application/events/recipe-published.handler';
-import type { RecipeVersionPublishedPayload } from '../../domain/recipe.aggregate';
+import { EventEnvelope } from '@mes/shared';
+import { RecipeProjectionHandler } from '../../application/events/recipe-projection.handler';
 
+const RECIPE_TOPIC = 'mes.recipe.versions';
+
+/**
+ * Kafka consumer that subscribes to the recipe versions topic and
+ * routes events to the RecipeProjectionHandler for idempotent processing.
+ */
 @Injectable()
 export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(KafkaConsumerService.name);
   private consumer!: Consumer;
-  constructor(private readonly handler: RecipePublishedHandler) {}
-  async onModuleInit() {
-    const kafka = new Kafka({ clientId: 'recipe-service', brokers: (process.env['KAFKA_BROKERS'] ?? 'localhost:9092').split(',') });
-    this.consumer = kafka.consumer({ groupId: 'recipe-service-group' });
+
+  constructor(private readonly projectionHandler: RecipeProjectionHandler) {}
+
+  async onModuleInit(): Promise<void> {
+    const kafka = new Kafka({
+      clientId: process.env['KAFKA_CLIENT_ID'] ?? 'recipe-service',
+      brokers: (process.env['KAFKA_BROKERS'] ?? 'localhost:9092').split(','),
+    });
+    this.consumer = kafka.consumer({ groupId: 'recipe-service-projection-group' });
     await this.consumer.connect();
-    await this.consumer.subscribe({ topics: [MesEventType.RECIPE_VERSION_PUBLISHED], fromBeginning: false });
-    await this.consumer.run({ eachMessage: this.handle.bind(this) });
+    await this.consumer.subscribe({ topics: [RECIPE_TOPIC], fromBeginning: false });
+    await this.consumer.run({ eachMessage: (payload) => this.handle(payload) });
+    this.logger.log(`Kafka consumer subscribed to ${RECIPE_TOPIC}`);
   }
-  async onModuleDestroy() { await this.consumer.disconnect(); }
-  private async handle({ message }: EachMessagePayload) {
+
+  async onModuleDestroy(): Promise<void> {
+    await this.consumer.disconnect();
+    this.logger.log('Kafka consumer disconnected');
+  }
+
+  private async handle({ message }: EachMessagePayload): Promise<void> {
     if (!message.value) return;
-    await this.handler.handle(JSON.parse(message.value.toString()) as EventEnvelope<RecipeVersionPublishedPayload>);
+    try {
+      const envelope = JSON.parse(message.value.toString()) as EventEnvelope<unknown>;
+      await this.projectionHandler.handleIdempotent(envelope);
+    } catch (err) {
+      this.logger.error(`Failed to process message: ${String(err)}`);
+    }
   }
 }

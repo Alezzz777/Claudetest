@@ -9,7 +9,7 @@ interface CacheEntry {
 }
 
 const TTL_MS = 5 * 60 * 1000; // 5 minutes
-const MAX_ENTRIES = 500;
+export const MAX_ENTRIES = 500;
 
 /**
  * In-memory LRU cache for active recipe versions.
