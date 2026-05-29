@@ -10,8 +10,6 @@ import { Roles, RolesGuard } from './guards/roles.guard';
 import { CreateUserCommand } from '../application/commands/create-user.command';
 import { DeactivateUserCommand } from '../application/commands/deactivate-user.command';
 import { AssignRoleCommand } from '../application/commands/assign-role.handler';
-import { CreateUserCommand } from '../application/commands/create-user.command';
-import { DeactivateUserCommand } from '../application/commands/deactivate-user.command';
 import { GetUserQuery, UserReadModel } from '../application/queries/get-user.handler';
 import { ListUsersQuery, PaginatedUsers } from '../application/queries/list-users.handler';
 import type { MesRole } from '../domain/user.aggregate';
