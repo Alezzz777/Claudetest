@@ -6,9 +6,13 @@ import { MqttSparkplugAdapterModule } from './adapters/mqtt-sparkplug/mqtt-spark
 import { ErpB2mmlAdapterModule } from './adapters/erp-b2mml/erp-b2mml-adapter.module';
 import { PersistenceModule } from './infrastructure/persistence/persistence.module';
 import { MessagingModule } from './infrastructure/messaging/messaging.module';
+import { EdgeModeService } from './infrastructure/edge/edge-mode.service';
 import { ProcessTelemetryHandler } from './application/commands/process-telemetry.handler';
+import { RegisterDeviceHandler } from './application/commands/register-device.handler';
 import { GetDeviceStatusHandler } from './application/queries/get-device-status.handler';
-import { DeviceOnlineHandler } from './application/events/device-online.handler';
+import { ListDevicesHandler } from './application/queries/list-devices.handler';
+import { GetEdgeBufferStatusHandler } from './application/queries/get-edge-buffer-status.handler';
+import { DeviceProjectionHandler } from './application/events/device-online.handler';
 import { IntegrationController } from './api/integration.controller';
 
 @Module({
@@ -22,6 +26,14 @@ import { IntegrationController } from './api/integration.controller';
     ErpB2mmlAdapterModule,
   ],
   controllers: [IntegrationController],
-  providers: [ProcessTelemetryHandler, GetDeviceStatusHandler, DeviceOnlineHandler],
+  providers: [
+    EdgeModeService,
+    DeviceProjectionHandler,
+    ProcessTelemetryHandler,
+    RegisterDeviceHandler,
+    GetDeviceStatusHandler,
+    ListDevicesHandler,
+    GetEdgeBufferStatusHandler,
+  ],
 })
 export class AppModule {}

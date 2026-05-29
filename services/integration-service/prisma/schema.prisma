@@ -5,3 +5,4 @@ model Outbox { id String @id; eventType String; aggregateType String; aggregateI
 model ProcessedEvent { eventId String @id; processedAt DateTime; @@map("processed_events") }
 model DeviceProjection { deviceId String @id; status String; protocol String; unsPath String?; lastSeenAt DateTime?; createdAt DateTime @default(now()); updatedAt DateTime @updatedAt; @@index([status]); @@map("device_projections") }
 model TelemetryBuffer { id String @id @default(uuid()); deviceId String; metric String; value Float; uom String?; protocol String; timestamp DateTime; published Boolean @default(false); createdAt DateTime @default(now()); @@index([deviceId, timestamp]); @@index([published]); @@map("telemetry_buffer") }
+model EdgeBuffer { id String @id @default(uuid()); topic String; partitionKey String; payload Json; replayed Boolean @default(false); createdAt DateTime @default(now()); @@index([replayed, createdAt]); @@map("edge_buffer") }

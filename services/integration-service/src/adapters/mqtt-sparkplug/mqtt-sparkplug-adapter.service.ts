@@ -1,251 +1,181 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
-import mqtt, { MqttClient, IClientOptions } from 'mqtt';
-import { createEventEnvelope, MesEventType } from '@mes/shared';
+import { connect as mqttConnect, MqttClient } from 'mqtt';
 import { KafkaProducerService } from '../../infrastructure/messaging/kafka-producer.service';
+import { PrismaService } from '../../infrastructure/persistence/prisma.service';
+import { SparkplugDecoder } from './sparkplug-decoder';
+import { createEventEnvelope, MesEventType } from '@mes/shared';
+import { v4 as uuidv4 } from 'uuid';
 
-/**
- * MQTT / Sparkplug B adapter.
- *
- * Sparkplug B is an MQTT application-layer specification that defines:
- *  - Topic namespace: spBv1.0/<group_id>/<message_type>/<edge_node_id>/<device_id>
- *  - Payload: Google Protocol Buffers (protobuf)
- *  - Birth/Death certificates for edge nodes and devices
- *  - Data (DDATA) messages for telemetry
- *
- * This adapter subscribes to the Sparkplug namespace, decodes payloads,
- * and maps them to the MES Unified Namespace (UNS) / ISA-95 hierarchy,
- * then publishes to Kafka.
- *
- * Sparkplug message types:
- *  NBIRTH — Node birth (edge node comes online)
- *  NDEATH — Node death
- *  DBIRTH — Device birth
- *  DDEATH — Device death
- *  DDATA  — Device telemetry data
- *  NDATA  — Node telemetry data
- */
 @Injectable()
 export class MqttSparkplugAdapterService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(MqttSparkplugAdapterService.name);
   private client: MqttClient | null = null;
+  private readonly decoder = new SparkplugDecoder();
+  private readonly devicePresence = new Map<string, boolean>();
 
-  /** Sparkplug group IDs to subscribe to (maps to ISA-95 areas/lines) */
-  private readonly sparkplugGroups = ['plant-01', 'plant-02'];
-
-  constructor(private readonly kafkaProducer: KafkaProducerService) {}
+  constructor(
+    private readonly kafkaProducer: KafkaProducerService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   async onModuleInit(): Promise<void> {
-    const brokerUrl = process.env['MQTT_BROKER_URL'] ?? 'mqtt://localhost:1883';
-    const clientId = process.env['MQTT_CLIENT_ID'] ?? `mes-integration-${Date.now()}`;
-
-    const options: IClientOptions = {
-      clientId,
-      clean: true,
-      keepalive: 60,
-      reconnectPeriod: 5000,
-      connectTimeout: 30000,
-      will: {
-        topic: `spBv1.0/STATE/mes-integration`,
-        payload: Buffer.from('OFFLINE'),
-        qos: 1,
-        retain: true,
-      },
-    };
-
-    const username = process.env['MQTT_USERNAME'];
-    const password = process.env['MQTT_PASSWORD'];
-    if (username) options.username = username;
-    if (password) options.password = password;
-
-    this.client = mqtt.connect(brokerUrl, options);
-
-    this.client.on('connect', () => {
-      this.logger.log(`MQTT connected to ${brokerUrl}`);
-      this.subscribeToSparkplug();
-    });
-
-    this.client.on('message', (topic: string, payload: Buffer) => {
-      void this.handleMessage(topic, payload);
-    });
-
-    this.client.on('error', (err) => {
-      this.logger.error(`MQTT error: ${err.message}`);
-    });
-
-    this.client.on('offline', () => {
-      this.logger.warn('MQTT client offline — buffering incoming data locally');
-    });
+    const brokerUrl = process.env['MQTT_BROKER_URL'];
+    if (!brokerUrl) {
+      this.logger.warn('MQTT_BROKER_URL not configured — skipping MQTT/Sparkplug B adapter');
+      return;
+    }
+    await this.connectMqtt(brokerUrl);
   }
 
   async onModuleDestroy(): Promise<void> {
-    await new Promise<void>((resolve) => {
-      if (this.client) {
-        this.client.end(false, {}, resolve);
-      } else {
-        resolve();
-      }
-    });
+    this.client?.end(true);
   }
 
-  private subscribeToSparkplug(): void {
-    if (!this.client) return;
-    for (const group of this.sparkplugGroups) {
-      // Subscribe to all Sparkplug B message types for this group
-      const topics = [
-        `spBv1.0/${group}/NBIRTH/#`,
-        `spBv1.0/${group}/NDEATH/#`,
-        `spBv1.0/${group}/DBIRTH/#`,
-        `spBv1.0/${group}/DDEATH/#`,
-        `spBv1.0/${group}/DDATA/#`,
-        `spBv1.0/${group}/NDATA/#`,
-      ];
-      this.client.subscribe(topics, { qos: 1 }, (err) => {
-        if (err) {
-          this.logger.error(`MQTT subscribe error for group ${group}: ${err.message}`);
-        } else {
-          this.logger.log(`Subscribed to Sparkplug group: ${group}`);
-        }
+  private async connectMqtt(brokerUrl: string): Promise<void> {
+    return new Promise((resolve) => {
+      this.client = mqttConnect(brokerUrl, {
+        clientId: `mes-integration-${uuidv4()}`,
+        clean: true,
+        reconnectPeriod: 5000,
       });
-    }
+
+      this.client.on('connect', () => {
+        this.logger.log(`MQTT connected to ${brokerUrl}`);
+        this.client!.subscribe('spBv1.0/#', { qos: 1 }, (err) => {
+          if (err) {
+            this.logger.error(`MQTT subscribe error: ${err.message}`);
+          } else {
+            this.logger.log('Subscribed to spBv1.0/#');
+          }
+        });
+        resolve();
+      });
+
+      this.client.on('message', (topic: string, payload: Buffer) => {
+        void this.handleMessage(topic, payload);
+      });
+
+      this.client.on('error', (err) => {
+        this.logger.error(`MQTT error: ${err.message}`);
+      });
+
+      this.client.on('offline', () => {
+        this.logger.warn('MQTT client offline');
+      });
+    });
   }
 
   private async handleMessage(topic: string, payload: Buffer): Promise<void> {
-    // Topic format: spBv1.0/<group_id>/<message_type>/<edge_node_id>[/<device_id>]
-    const parts = topic.split('/');
-    if (parts.length < 4) return;
+    const parsed = this.decoder.parseTopic(topic);
+    if (!parsed) return;
 
-    const [, groupId, messageType, edgeNodeId, deviceId] = parts as [string, string, string, string, string | undefined];
+    const { groupId, messageType, edgeNodeId, deviceId } = parsed;
+    const decoded = this.decoder.decode(payload);
+    const effectiveDeviceId = deviceId ?? edgeNodeId;
 
     switch (messageType) {
       case 'NBIRTH':
-        await this.handleNodeBirth(groupId, edgeNodeId, payload);
+      case 'DBIRTH': {
+        this.devicePresence.set(effectiveDeviceId, true);
+        const envelope = createEventEnvelope({
+          type: MesEventType.INTEGRATION_DEVICE_ONLINE,
+          source: `urn:mes:integration-service:SparkplugB:${groupId}`,
+          aggregateId: effectiveDeviceId,
+          aggregateType: 'Device',
+          sequence: 1,
+          data: {
+            deviceId: effectiveDeviceId,
+            groupId,
+            edgeNodeId,
+            metrics: decoded.metrics,
+            timestamp: new Date(decoded.timestamp).toISOString(),
+            protocol: 'SPARKPLUG_B',
+          },
+        });
+        await this.kafkaProducer.publish(
+          'mes.integration.telemetry',
+          effectiveDeviceId,
+          JSON.stringify(envelope),
+        );
+        await this.upsertDeviceProjection(effectiveDeviceId, 'ONLINE', 'SPARKPLUG_B');
         break;
+      }
       case 'NDEATH':
-        await this.handleNodeDeath(groupId, edgeNodeId, payload);
+      case 'DDEATH': {
+        this.devicePresence.set(effectiveDeviceId, false);
+        const envelope = createEventEnvelope({
+          type: MesEventType.INTEGRATION_DEVICE_OFFLINE,
+          source: `urn:mes:integration-service:SparkplugB:${groupId}`,
+          aggregateId: effectiveDeviceId,
+          aggregateType: 'Device',
+          sequence: 1,
+          data: {
+            deviceId: effectiveDeviceId,
+            groupId,
+            timestamp: new Date(decoded.timestamp).toISOString(),
+            protocol: 'SPARKPLUG_B',
+          },
+        });
+        await this.kafkaProducer.publish(
+          'mes.integration.telemetry',
+          effectiveDeviceId,
+          JSON.stringify(envelope),
+        );
+        await this.upsertDeviceProjection(effectiveDeviceId, 'OFFLINE', 'SPARKPLUG_B');
         break;
-      case 'DBIRTH':
-        if (deviceId) await this.handleDeviceBirth(groupId, edgeNodeId, deviceId, payload);
-        break;
-      case 'DDEATH':
-        if (deviceId) await this.handleDeviceDeath(groupId, edgeNodeId, deviceId, payload);
-        break;
-      case 'DDATA':
-        if (deviceId) await this.handleDeviceData(groupId, edgeNodeId, deviceId, payload);
-        break;
+      }
       case 'NDATA':
-        await this.handleNodeData(groupId, edgeNodeId, payload);
+      case 'DDATA': {
+        const envelope = createEventEnvelope({
+          type: MesEventType.INTEGRATION_TELEMETRY_RECEIVED,
+          source: `urn:mes:integration-service:SparkplugB:${groupId}`,
+          aggregateId: effectiveDeviceId,
+          aggregateType: 'Device',
+          sequence: 1,
+          data: {
+            deviceId: effectiveDeviceId,
+            metrics: decoded.metrics,
+            timestamp: new Date(decoded.timestamp).toISOString(),
+            protocol: 'SPARKPLUG_B',
+          },
+        });
+        await this.kafkaProducer.publish(
+          `mes.uns.${groupId}.telemetry`,
+          effectiveDeviceId,
+          JSON.stringify(envelope),
+        );
+
+        // Buffer metrics
+        for (const metric of decoded.metrics) {
+          try {
+            await this.prisma.telemetryBuffer.create({
+              data: {
+                id: uuidv4(),
+                deviceId: effectiveDeviceId,
+                metric: metric.name,
+                value: typeof metric.value === 'number' ? metric.value : 0,
+                protocol: 'SPARKPLUG_B',
+                timestamp: new Date(metric.timestamp),
+              },
+            });
+          } catch (err) {
+            this.logger.warn(`Failed to buffer telemetry: ${err}`);
+          }
+        }
         break;
+      }
     }
   }
 
-  private async handleDeviceBirth(groupId: string, edgeNodeId: string, deviceId: string, payload: Buffer): Promise<void> {
-    // In production: decode protobuf using sparkplug-b proto definition
-    const decodedPayload = this.decodeSparkplugPayload(payload);
-    const equipmentId = `${groupId}:${edgeNodeId}:${deviceId}`;
-
-    const envelope = createEventEnvelope({
-      type: MesEventType.INTEGRATION_DEVICE_ONLINE,
-      source: `urn:mes:integration-service:SparkplugAdapter:${groupId}`,
-      aggregateId: equipmentId,
-      aggregateType: 'Equipment',
-      sequence: 1,
-      data: {
-        equipmentId,
-        groupId, edgeNodeId, deviceId,
-        protocol: 'SPARKPLUG_B',
-        metrics: decodedPayload.metrics,
-        timestamp: decodedPayload.timestamp,
-        unsPath: this.buildUnsPath(groupId, edgeNodeId, deviceId),
-      },
-    });
-
-    await this.kafkaProducer.publish(MesEventType.INTEGRATION_DEVICE_ONLINE, `Equipment:${equipmentId}`, JSON.stringify(envelope));
-    this.logger.log(`Device BIRTH: ${equipmentId}`);
-  }
-
-  private async handleDeviceData(groupId: string, edgeNodeId: string, deviceId: string, payload: Buffer): Promise<void> {
-    const decodedPayload = this.decodeSparkplugPayload(payload);
-    const equipmentId = `${groupId}:${edgeNodeId}:${deviceId}`;
-
-    // Publish individual telemetry event per metric
-    for (const metric of decodedPayload.metrics) {
-      const envelope = createEventEnvelope({
-        type: MesEventType.INTEGRATION_TELEMETRY_RECEIVED,
-        source: `urn:mes:integration-service:SparkplugAdapter`,
-        aggregateId: equipmentId,
-        aggregateType: 'Equipment',
-        sequence: 1,
-        data: {
-          equipmentId,
-          metric: metric.name,
-          value: metric.value,
-          dataType: metric.type,
-          unsPath: `${this.buildUnsPath(groupId, edgeNodeId, deviceId)}/${metric.name}`,
-          timestamp: metric.timestamp ?? decodedPayload.timestamp,
-          protocol: 'SPARKPLUG_B',
-          quality: 'Good',
-        },
-      });
-      await this.kafkaProducer.publish(MesEventType.INTEGRATION_TELEMETRY_RECEIVED, `Equipment:${equipmentId}`, JSON.stringify(envelope));
-    }
-  }
-
-  private async handleNodeBirth(groupId: string, edgeNodeId: string, _payload: Buffer): Promise<void> {
-    this.logger.log(`Node BIRTH: ${groupId}/${edgeNodeId}`);
-  }
-
-  private async handleNodeDeath(groupId: string, edgeNodeId: string, _payload: Buffer): Promise<void> {
-    this.logger.warn(`Node DEATH: ${groupId}/${edgeNodeId}`);
-  }
-
-  private async handleDeviceDeath(groupId: string, edgeNodeId: string, deviceId: string, _payload: Buffer): Promise<void> {
-    const equipmentId = `${groupId}:${edgeNodeId}:${deviceId}`;
-    const envelope = createEventEnvelope({
-      type: MesEventType.INTEGRATION_DEVICE_OFFLINE,
-      source: 'urn:mes:integration-service:SparkplugAdapter',
-      aggregateId: equipmentId, aggregateType: 'Equipment', sequence: 1,
-      data: { equipmentId, groupId, edgeNodeId, deviceId, timestamp: new Date().toISOString() },
-    });
-    await this.kafkaProducer.publish(MesEventType.INTEGRATION_DEVICE_OFFLINE, `Equipment:${equipmentId}`, JSON.stringify(envelope));
-  }
-
-  private async handleNodeData(groupId: string, edgeNodeId: string, payload: Buffer): Promise<void> {
-    // Node-level telemetry (edge node metrics, e.g. edge gateway health)
-    this.logger.debug(`Node DATA: ${groupId}/${edgeNodeId}`);
-  }
-
-  /**
-   * Decode Sparkplug B protobuf payload.
-   * In production this should use the sparkplug-b-payload proto library.
-   * This stub parses a simplified JSON-encoded payload for development.
-   */
-  private decodeSparkplugPayload(payload: Buffer): {
-    timestamp: string;
-    metrics: Array<{ name: string; value: unknown; type: string; timestamp?: string }>;
-  } {
+  private async upsertDeviceProjection(deviceId: string, status: string, protocol: string): Promise<void> {
     try {
-      const parsed = JSON.parse(payload.toString()) as {
-        timestamp?: number;
-        metrics?: Array<{ name: string; value: unknown; type: string; timestamp?: number }>;
-      };
-      return {
-        timestamp: parsed.timestamp ? new Date(parsed.timestamp).toISOString() : new Date().toISOString(),
-        metrics: (parsed.metrics ?? []).map((m) => ({
-          name: m.name,
-          value: m.value,
-          type: m.type,
-          timestamp: m.timestamp ? new Date(m.timestamp).toISOString() : undefined,
-        })),
-      };
-    } catch {
-      // Binary protobuf — would use real sparkplug-b decoder in production
-      return { timestamp: new Date().toISOString(), metrics: [] };
+      await this.prisma.deviceProjection.upsert({
+        where: { deviceId },
+        update: { status, updatedAt: new Date(), lastSeenAt: new Date() },
+        create: { deviceId, status, protocol, lastSeenAt: new Date() },
+      });
+    } catch (err) {
+      this.logger.warn(`Failed to upsert device projection: ${err}`);
     }
-  }
-
-  /** Map Sparkplug namespace to ISA-95 UNS hierarchy */
-  private buildUnsPath(groupId: string, edgeNodeId: string, deviceId: string): string {
-    // groupId maps to site/area, edgeNodeId to line/cell, deviceId to device
-    return `${process.env['UNS_ENTERPRISE'] ?? 'enterprise'}/${groupId}/${edgeNodeId}/${deviceId}`;
   }
 }

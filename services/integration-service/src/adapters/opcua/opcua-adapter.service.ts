@@ -2,152 +2,185 @@ import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/commo
 import {
   OPCUAClient,
   ClientSession,
-  AttributeIds,
   DataValue,
   TimestampsToReturn,
+  AttributeIds,
   ClientMonitoredItem,
   ClientSubscription,
   MonitoringParametersOptions,
   ReadValueIdOptions,
 } from 'node-opcua';
 import { KafkaProducerService } from '../../infrastructure/messaging/kafka-producer.service';
+import { PrismaService } from '../../infrastructure/persistence/prisma.service';
+import { UnsMapper } from './uns-mapper';
 import { createEventEnvelope, MesEventType } from '@mes/shared';
 import { v4 as uuidv4 } from 'uuid';
 
-/**
- * OPC UA Adapter — connects to an OPC UA server (PLC / SCADA), subscribes to
- * data changes on configured node IDs, and publishes telemetry events to Kafka.
- *
- * Uses OPC UA subscriptions for push-based data change notifications (preferred
- * over polling) to minimize latency and server load.
- *
- * UNS topic mapping: OPC UA node path → enterprise/site/area/line/cell/device/variable
- */
 @Injectable()
-export class OpcUaAdapterService implements OnModuleInit, OnModuleDestroy {
-  private readonly logger = new Logger(OpcUaAdapterService.name);
+export class OpcuaAdapterService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(OpcuaAdapterService.name);
   private client: OPCUAClient | null = null;
   private session: ClientSession | null = null;
   private subscription: ClientSubscription | null = null;
+  private reconnectAttempts = 0;
+  private readonly MAX_RECONNECT = 10;
+  private reconnectTimer: NodeJS.Timeout | null = null;
 
-  /** Nodes to monitor — loaded from configuration / DB in production */
-  private readonly monitoredNodes: Array<{ nodeId: string; unsPath: string; equipmentId: string }> = [
-    { nodeId: 'ns=2;s=PLC1.RunHours', unsPath: 'acme/plant-01/assembly/line-A/cell-1/plc-1/run-hours', equipmentId: 'equip-plc-001' },
-    { nodeId: 'ns=2;s=PLC1.CycleCount', unsPath: 'acme/plant-01/assembly/line-A/cell-1/plc-1/cycle-count', equipmentId: 'equip-plc-001' },
-    { nodeId: 'ns=2;s=PLC1.Fault', unsPath: 'acme/plant-01/assembly/line-A/cell-1/plc-1/fault', equipmentId: 'equip-plc-001' },
-  ];
-
-  constructor(private readonly kafkaProducer: KafkaProducerService) {}
+  constructor(
+    private readonly kafkaProducer: KafkaProducerService,
+    private readonly unsMapper: UnsMapper,
+    private readonly prisma: PrismaService,
+  ) {}
 
   async onModuleInit(): Promise<void> {
-    const endpointUrl = process.env['OPCUA_ENDPOINT_URL'] ?? 'opc.tcp://localhost:4840';
+    const endpoint = process.env['OPCUA_ENDPOINT'];
+    if (!endpoint) {
+      this.logger.warn('OPCUA_ENDPOINT not configured — skipping OPC UA adapter');
+      return;
+    }
+    await this.connect(endpoint);
+  }
 
-    this.client = OPCUAClient.create({
-      endpointMustExist: false,
-      connectionStrategy: {
-        initialDelay: 1000,
-        maxRetry: 10,
-        maxDelay: 30000,
-      },
-    });
+  async onModuleDestroy(): Promise<void> {
+    await this.disconnect();
+  }
 
+  private async connect(endpoint: string): Promise<void> {
     try {
-      await this.client.connect(endpointUrl);
-      this.logger.log(`OPC UA client connected to ${endpointUrl}`);
+      this.client = OPCUAClient.create({ connectionStrategy: { maxRetry: 1 } });
+      await this.client.connect(endpoint);
+      this.logger.log(`OPC UA connected to ${endpoint}`);
 
       this.session = await this.client.createSession();
       this.logger.log('OPC UA session created');
 
-      await this.setupSubscriptions();
-    } catch (err) {
-      this.logger.error(`Failed to connect to OPC UA server at ${endpointUrl}: ${err}`);
-      // In edge mode, keep retrying — don't crash the service
-    }
-  }
+      this.reconnectAttempts = 0;
 
-  async onModuleDestroy(): Promise<void> {
-    try {
-      if (this.subscription) await this.subscription.terminate();
-      if (this.session) await this.session.close();
-      if (this.client) await this.client.disconnect();
-      this.logger.log('OPC UA client disconnected');
-    } catch (err) {
-      this.logger.error(`Error during OPC UA shutdown: ${err}`);
-    }
-  }
-
-  private async setupSubscriptions(): Promise<void> {
-    if (!this.session) return;
-
-    this.subscription = await this.session.createSubscription2({
-      requestedPublishingInterval: 1000,      // ms
-      requestedLifetimeCount: 100,
-      requestedMaxKeepAliveCount: 10,
-      maxNotificationsPerPublish: 100,
-      publishingEnabled: true,
-      priority: 10,
-    });
-
-    for (const node of this.monitoredNodes) {
-      const itemToMonitor: ReadValueIdOptions = {
-        nodeId: node.nodeId,
-        attributeId: AttributeIds.Value,
-      };
-      const monitoringParameters: MonitoringParametersOptions = {
-        samplingInterval: 500,
-        discardOldest: true,
-        queueSize: 10,
-      };
-
-      const monitoredItem = ClientMonitoredItem.create(
-        this.subscription,
-        itemToMonitor,
-        monitoringParameters,
-        TimestampsToReturn.Both,
-      );
-
-      monitoredItem.on('changed', (dataValue: DataValue) => {
-        void this.handleDataChange(node, dataValue);
+      this.subscription = await this.session.createSubscription2({
+        requestedPublishingInterval: 1000,
+        requestedLifetimeCount: 100,
+        requestedMaxKeepAliveCount: 10,
+        maxNotificationsPerPublish: 100,
+        publishingEnabled: true,
+        priority: 10,
       });
-    }
 
-    this.logger.log(`Subscribed to ${this.monitoredNodes.length} OPC UA node(s)`);
+      const nodeIdsEnv = process.env['OPCUA_NODE_IDS'] ?? '';
+      const nodeIds = nodeIdsEnv.split(',').map((s) => s.trim()).filter(Boolean);
+
+      for (const nodeId of nodeIds) {
+        const itemToMonitor: ReadValueIdOptions = {
+          nodeId,
+          attributeId: AttributeIds.Value,
+        };
+        const monitoringParameters: MonitoringParametersOptions = {
+          samplingInterval: 500,
+          discardOldest: true,
+          queueSize: 10,
+        };
+
+        const monitoredItem = ClientMonitoredItem.create(
+          this.subscription,
+          itemToMonitor,
+          monitoringParameters,
+          TimestampsToReturn.Both,
+        );
+
+        monitoredItem.on('changed', (dataValue: DataValue) => {
+          void this.handleDataChange(nodeId, dataValue);
+        });
+        monitoredItem.on('err', (err: Error) => {
+          this.logger.error(`Monitored item error for ${nodeId}: ${err.message}`);
+        });
+      }
+
+      this.client.on('close', () => {
+        this.logger.warn('OPC UA connection closed — scheduling reconnect');
+        this.scheduleReconnect(endpoint);
+      });
+
+      this.logger.log(`Subscribed to ${nodeIds.length} OPC UA nodes`);
+    } catch (err) {
+      this.logger.error(`OPC UA connect failed: ${err}`);
+      this.scheduleReconnect(endpoint);
+    }
   }
 
-  private async handleDataChange(
-    node: { nodeId: string; unsPath: string; equipmentId: string },
-    dataValue: DataValue,
-  ): Promise<void> {
+  private scheduleReconnect(endpoint: string): void {
+    if (this.reconnectAttempts >= this.MAX_RECONNECT) {
+      this.logger.error('Max OPC UA reconnect attempts reached');
+      return;
+    }
+    const delay = Math.min(Math.pow(2, this.reconnectAttempts) * 1000, 30000);
+    this.reconnectAttempts++;
+    this.logger.warn(`Reconnecting to OPC UA in ${delay}ms (attempt ${this.reconnectAttempts})`);
+    this.reconnectTimer = setTimeout(() => {
+      void this.connect(endpoint);
+    }, delay);
+  }
+
+  private async handleDataChange(nodeId: string, dataValue: DataValue): Promise<void> {
+    const mapping = this.unsMapper.map(nodeId);
+    if (!mapping) {
+      this.logger.warn(`No UNS mapping for nodeId: ${nodeId}`);
+      return;
+    }
+
+    const unsPath = this.unsMapper.toKafkaTopic(mapping);
     const value = dataValue.value?.value;
-    if (value === undefined || value === null) return;
+    const timestamp = dataValue.sourceTimestamp?.toISOString() ?? new Date().toISOString();
 
     const envelope = createEventEnvelope({
       type: MesEventType.INTEGRATION_TELEMETRY_RECEIVED,
-      source: `urn:mes:integration-service:OpcUaAdapter:${node.nodeId}`,
-      aggregateId: node.equipmentId,
-      aggregateType: 'Equipment',
+      source: `urn:mes:integration-service:OpcUA:${nodeId}`,
+      aggregateId: mapping.device,
+      aggregateType: 'Device',
       sequence: 1,
       data: {
-        equipmentId: node.equipmentId,
-        nodeId: node.nodeId,
-        unsPath: node.unsPath,
+        deviceId: mapping.device,
+        unsPath,
+        metric: mapping.metric,
         value,
-        dataType: dataValue.value?.dataType?.toString() ?? 'Unknown',
-        sourceTimestamp: dataValue.sourceTimestamp?.toISOString() ?? new Date().toISOString(),
-        serverTimestamp: dataValue.serverTimestamp?.toISOString() ?? new Date().toISOString(),
-        quality: dataValue.statusCode?.toString() ?? 'Good',
+        timestamp,
         protocol: 'OPC_UA',
       },
     });
 
     try {
-      await this.kafkaProducer.publish(
-        MesEventType.INTEGRATION_TELEMETRY_RECEIVED,
-        `Equipment:${node.equipmentId}`,
-        JSON.stringify(envelope),
-      );
+      await this.kafkaProducer.publish(unsPath, mapping.device, JSON.stringify(envelope));
     } catch (err) {
-      this.logger.error(`Failed to publish telemetry for node ${node.nodeId}: ${err}`);
+      this.logger.error(`Failed to publish telemetry for ${nodeId}: ${err}`);
+    }
+
+    // Buffer in TelemetryBuffer for edge mode
+    try {
+      await this.prisma.telemetryBuffer.create({
+        data: {
+          id: uuidv4(),
+          deviceId: mapping.device,
+          metric: mapping.metric,
+          value: typeof value === 'number' ? value : 0,
+          protocol: 'OPC_UA',
+          timestamp: new Date(timestamp),
+        },
+      });
+    } catch (err) {
+      this.logger.warn(`Failed to buffer telemetry: ${err}`);
+    }
+  }
+
+  private async disconnect(): Promise<void> {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    try {
+      if (this.subscription) await this.subscription.terminate();
+      if (this.session) await this.session.close();
+      if (this.client) await this.client.disconnect();
+      this.logger.log('OPC UA disconnected');
+    } catch (err) {
+      this.logger.error(`Error during OPC UA disconnect: ${err}`);
     }
   }
 }
