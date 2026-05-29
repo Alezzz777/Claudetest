@@ -74,6 +74,7 @@ export enum MesEventType {
   // ─── Admin Domain ────────────────────────────────────────────────────────
   ADMIN_USER_CREATED              = 'admin.user.created',
   ADMIN_USER_ROLE_ASSIGNED        = 'admin.user.role-assigned',
+  ADMIN_USER_DEACTIVATED          = 'admin.user.deactivated',
   ADMIN_SCHEMA_REGISTERED         = 'admin.schema.registered',
   ADMIN_AUDIT_LOG_WRITTEN         = 'admin.audit.log-written',
 }
