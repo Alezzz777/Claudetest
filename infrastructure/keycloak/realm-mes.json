@@ -1,0 +1,73 @@
+{
+  "realm": "mes",
+  "enabled": true,
+  "displayName": "MES Platform",
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": false,
+  "accessTokenLifespan": 3600,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "roles": {
+    "realm": [
+      { "name": "operator",             "description": "Shop-floor operator" },
+      { "name": "dispatcher",           "description": "Production dispatcher" },
+      { "name": "quality-controller",   "description": "Quality control engineer" },
+      { "name": "technologist",         "description": "Process technologist" },
+      { "name": "maintenance-engineer", "description": "Maintenance engineer" },
+      { "name": "admin",                "description": "System administrator" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "mes-services",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "mes-secret",
+      "serviceAccountsEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "protocol": "openid-connect",
+      "attributes": {
+        "use.refresh.tokens": "false"
+      }
+    },
+    {
+      "clientId": "mes-frontend",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "protocol": "openid-connect",
+      "redirectUris": ["http://localhost:5173/*"],
+      "webOrigins": ["http://localhost:5173"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      }
+    }
+  ],
+  "users": [
+    {
+      "username": "admin@mes.local",
+      "email": "admin@mes.local",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "admin123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["admin"]
+    }
+  ]
+}
