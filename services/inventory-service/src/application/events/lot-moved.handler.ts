@@ -80,15 +80,6 @@ export class LotProjectionHandler extends IdempotentEventHandler<unknown> {
 
   private async onLotReleased(event: EventEnvelope<LotReleasedPayload>): Promise<void> {
     const d = event.data;
-    const lot = await this.prisma.lotProjection.findUnique({ where: { lotId: d.lotId } });
-    if (!lot) return;
-    await this.prisma.lotProjection.update({
-      where: { lotId: d.lotId },
-      data: {
-        reservedQty: Math.max(0, lot.reservedQty - 0), // reset to 0
-        status: 'AVAILABLE',
-      },
-    });
     await this.prisma.lotProjection.update({
       where: { lotId: d.lotId },
       data: { reservedQty: 0, status: 'AVAILABLE' },
