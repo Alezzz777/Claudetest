@@ -1,0 +1,13 @@
+{
+  "name": "@mes/infra-tests",
+  "private": true,
+  "scripts": { "test": "vitest run --config vitest.config.ts" },
+  "devDependencies": {
+    "vitest": "^1.5.0",
+    "kafkajs": "^2.2.4",
+    "pg": "^8.11.5",
+    "@types/pg": "^8.11.5",
+    "mqtt": "^5.5.0",
+    "typescript": "^5.4.5"
+  }
+}
