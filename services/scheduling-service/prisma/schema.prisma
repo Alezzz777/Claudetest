@@ -5,3 +5,13 @@ model Outbox { id String @id; eventType String; aggregateType String; aggregateI
 model ProcessedEvent { eventId String @id; processedAt DateTime; @@map("processed_events") }
 model ScheduleProjection { scheduleId String @id; name String; shiftDate DateTime; status String @default("DRAFT"); createdAt DateTime @default(now()); updatedAt DateTime @updatedAt; @@map("schedule_projections") }
 model ScheduleEntryProjection { entryId String @id; scheduleId String; orderId String; workCenterId String; priority Int; plannedStartAt DateTime; plannedEndAt DateTime; status String @default("PLANNED"); actualStartAt DateTime?; actualEndAt DateTime?; @@index([scheduleId, status]); @@index([workCenterId]); @@map("schedule_entry_projections") }
+model OutboxEvent {
+  id           String    @id @default(uuid())
+  topic        String
+  partitionKey String
+  payload      Json
+  sent         Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  @@index([sent, createdAt])
+  @@map("outbox_events")
+}
