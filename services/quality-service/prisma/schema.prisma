@@ -1,0 +1,80 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model EventStore {
+  id            String   @id @default(uuid())
+  aggregateId   String
+  aggregateType String
+  eventType     String
+  sequence      Int
+  payload       Json
+  correlationId String
+  causationId   String?
+  createdAt     DateTime @default(now())
+
+  @@unique([aggregateId, sequence])
+  @@index([aggregateId])
+  @@map("event_store")
+}
+
+model Outbox {
+  id            String    @id
+  eventType     String
+  aggregateType String
+  aggregateId   String
+  payload       Json
+  topic         String
+  partitionKey  String
+  status        String    @default("PENDING")
+  attempts      Int       @default(0)
+  createdAt     DateTime  @default(now())
+  processedAt   DateTime?
+  lastError     String?
+
+  @@index([status, attempts])
+  @@map("outbox")
+}
+
+model ProcessedEvent {
+  eventId     String   @id
+  processedAt DateTime
+  @@map("processed_events")
+}
+
+model QualityPlanProjection {
+  planId            String   @id
+  orderId           String
+  totalMeasurements Int      @default(0)
+  passCount         Int      @default(0)
+  failCount         Int      @default(0)
+  ncrCount          Int      @default(0)
+  status            String   @default("ACTIVE")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([orderId])
+  @@map("quality_plan_projections")
+}
+
+model NcrProjection {
+  ncrId       String   @id
+  planId      String
+  orderId     String
+  severity    String
+  status      String   @default("OPEN")
+  description String
+  raisedBy    String
+  raisedAt    DateTime
+  closedAt    DateTime?
+  updatedAt   DateTime @updatedAt
+
+  @@index([orderId])
+  @@index([status])
+  @@map("ncr_projections")
+}

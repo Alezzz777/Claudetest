@@ -1,0 +1,271 @@
+version: '3.9'
+
+networks:
+  mes-net:
+    driver: bridge
+
+volumes:
+  zookeeper-data:
+  kafka-data:
+  schema-registry-data:
+  keycloak-data:
+  mosquitto-data:
+  pg-production:
+  pg-quality:
+  pg-maintenance:
+  pg-inventory:
+  pg-recipe:
+  pg-scheduling:
+  pg-integration:
+  pg-admin:
+  grafana-data:
+  prometheus-data:
+
+services:
+  # ─── Zookeeper ────────────────────────────────────────────────────────────
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    hostname: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper
+    networks: [mes-net]
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo ruok | nc localhost 2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Kafka ────────────────────────────────────────────────────────────────
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    hostname: kafka
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 168
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks: [mes-net]
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  # ─── Schema Registry ──────────────────────────────────────────────────────
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.6.0
+    hostname: schema-registry
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:9092
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+    networks: [mes-net]
+
+  # ─── Kafka UI ─────────────────────────────────────────────────────────────
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    ports:
+      - "8090:8080"
+    depends_on: [kafka, schema-registry]
+    environment:
+      KAFKA_CLUSTERS_0_NAME: mes-cluster
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://schema-registry:8081
+    networks: [mes-net]
+
+  # ─── MQTT Broker (Mosquitto) ───────────────────────────────────────────────
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./infrastructure/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto-data:/mosquitto/data
+    networks: [mes-net]
+
+  # ─── PostgreSQL — production-service ──────────────────────────────────────
+  pg-production:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: production_db
+      POSTGRES_USER: mes
+      POSTGRES_PASSWORD: mes_secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg-production:/var/lib/postgresql/data
+    networks: [mes-net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mes -d production_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ─── PostgreSQL — quality-service ─────────────────────────────────────────
+  pg-quality:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: quality_db
+      POSTGRES_USER: mes
+      POSTGRES_PASSWORD: mes_secret
+    ports:
+      - "5433:5432"
+    volumes:
+      - pg-quality:/var/lib/postgresql/data
+    networks: [mes-net]
+
+  # ─── PostgreSQL — maintenance-service ─────────────────────────────────────
+  pg-maintenance:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: maintenance_db
+      POSTGRES_USER: mes
+      POSTGRES_PASSWORD: mes_secret
+    ports:
+      - "5434:5432"
+    volumes:
+      - pg-maintenance:/var/lib/postgresql/data
+    networks: [mes-net]
+
+  # ─── PostgreSQL — inventory-service ───────────────────────────────────────
+  pg-inventory:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: inventory_db
+      POSTGRES_USER: mes
+      POSTGRES_PASSWORD: mes_secret
+    ports:
+      - "5435:5432"
+    volumes:
+      - pg-inventory:/var/lib/postgresql/data
+    networks: [mes-net]
+
+  # ─── PostgreSQL — recipe-service ──────────────────────────────────────────
+  pg-recipe:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: recipe_db
+      POSTGRES_USER: mes
+      POSTGRES_PASSWORD: mes_secret
+    ports:
+      - "5436:5432"
+    volumes:
+      - pg-recipe:/var/lib/postgresql/data
+    networks: [mes-net]
+
+  # ─── PostgreSQL — scheduling-service ──────────────────────────────────────
+  pg-scheduling:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: scheduling_db
+      POSTGRES_USER: mes
+      POSTGRES_PASSWORD: mes_secret
+    ports:
+      - "5437:5432"
+    volumes:
+      - pg-scheduling:/var/lib/postgresql/data
+    networks: [mes-net]
+
+  # ─── PostgreSQL — integration-service ─────────────────────────────────────
+  pg-integration:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: integration_db
+      POSTGRES_USER: mes
+      POSTGRES_PASSWORD: mes_secret
+    ports:
+      - "5438:5432"
+    volumes:
+      - pg-integration:/var/lib/postgresql/data
+    networks: [mes-net]
+
+  # ─── PostgreSQL — admin-service ───────────────────────────────────────────
+  pg-admin:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: admin_db
+      POSTGRES_USER: mes
+      POSTGRES_PASSWORD: mes_secret
+    ports:
+      - "5439:5432"
+    volumes:
+      - pg-admin:/var/lib/postgresql/data
+    networks: [mes-net]
+
+  # ─── Keycloak (OAuth2 / OIDC) ─────────────────────────────────────────────
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    command: start-dev --import-realm
+    ports:
+      - "8080:8080"
+    environment:
+      KC_DB: dev-mem
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - keycloak-data:/opt/keycloak/data
+      - ./infrastructure/keycloak/realm-mes.json:/opt/keycloak/data/import/realm-mes.json:ro
+    networks: [mes-net]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health/ready || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+
+  # ─── OpenTelemetry Collector ──────────────────────────────────────────────
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.97.0
+    command: ["--config=/etc/otel/config.yaml"]
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "9464:9464"   # Prometheus metrics
+    volumes:
+      - ./infrastructure/otel/config.yaml:/etc/otel/config.yaml:ro
+    networks: [mes-net]
+
+  # ─── Prometheus ───────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks: [mes-net]
+
+  # ─── Grafana ──────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.4.0
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./infrastructure/grafana/provisioning:/etc/grafana/provisioning:ro
+    networks: [mes-net]

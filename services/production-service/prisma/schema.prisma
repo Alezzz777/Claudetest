@@ -1,0 +1,117 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Event Store (append-only) ────────────────────────────────────────────────
+
+model EventStore {
+  id            String   @id @default(uuid())
+  aggregateId   String
+  aggregateType String
+  eventType     String
+  sequence      Int
+  payload       Json
+  correlationId String
+  causationId   String?
+  createdAt     DateTime @default(now())
+
+  @@unique([aggregateId, sequence])
+  @@index([aggregateId])
+  @@index([eventType])
+  @@index([createdAt])
+  @@map("event_store")
+}
+
+// ─── Transactional Outbox ─────────────────────────────────────────────────────
+
+model Outbox {
+  id           String   @id
+  eventType    String
+  aggregateType String
+  aggregateId  String
+  payload      Json
+  topic        String
+  partitionKey String
+  status       String   @default("PENDING")
+  attempts     Int      @default(0)
+  createdAt    DateTime @default(now())
+  processedAt  DateTime?
+  lastError    String?
+
+  @@index([status, attempts])
+  @@index([createdAt])
+  @@map("outbox")
+}
+
+// ─── Idempotency tracking ─────────────────────────────────────────────────────
+
+model ProcessedEvent {
+  eventId     String   @id
+  processedAt DateTime
+
+  @@map("processed_events")
+}
+
+// ─── Read-side Projections ────────────────────────────────────────────────────
+
+model ProductionOrderProjection {
+  orderId            String    @id
+  orderNo            String    @unique
+  recipeId           String
+  recipeVersion      String
+  status             String
+  plannedQty         Float
+  completedQty       Float     @default(0)
+  scrapQty           Float     @default(0)
+  workCenterId       String
+  scheduledStartAt   DateTime
+  scheduledEndAt     DateTime
+  actualStartAt      DateTime?
+  actualEndAt        DateTime?
+  oee                Float?
+  tenantId           String
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([status])
+  @@index([workCenterId])
+  @@index([tenantId])
+  @@map("production_order_projections")
+}
+
+model OeeProjection {
+  id           String   @id @default(uuid())
+  orderId      String
+  workCenterId String
+  availability Float
+  performance  Float
+  quality      Float
+  oee          Float
+  measuredAt   DateTime
+
+  @@index([workCenterId, measuredAt])
+  @@map("oee_projections")
+}
+
+// ─── Saga Instances ───────────────────────────────────────────────────────────
+
+model SagaInstance {
+  sagaId        String    @id
+  sagaType      String
+  status        String
+  context       Json
+  steps         Json
+  correlationId String
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  completedAt   DateTime?
+
+  @@index([status])
+  @@index([correlationId])
+  @@map("saga_instances")
+}

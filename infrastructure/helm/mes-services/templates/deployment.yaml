@@ -1,0 +1,62 @@
+{{- range $name, $svc := .Values.services }}
+{{- if $svc.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name | kebabcase }}
+  namespace: {{ $.Values.global.namespace }}
+  labels:
+    app: {{ $name | kebabcase }}
+    app.kubernetes.io/part-of: mes-platform
+spec:
+  replicas: {{ $svc.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ $name | kebabcase }}
+  template:
+    metadata:
+      labels:
+        app: {{ $name | kebabcase }}
+    spec:
+      containers:
+        - name: {{ $name | kebabcase }}
+          image: "{{ $.Values.global.imageRegistry }}{{ $svc.image.repository }}:{{ $svc.image.tag }}"
+          imagePullPolicy: {{ $.Values.global.imagePullPolicy }}
+          ports:
+            - containerPort: {{ $svc.port }}
+          envFrom:
+            - configMapRef:
+                name: mes-common-config
+            - secretRef:
+                name: {{ $name | kebabcase }}-secrets
+                optional: true
+          resources:
+            {{- toYaml $svc.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: {{ $svc.port }}
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: {{ $svc.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name | kebabcase }}
+  namespace: {{ $.Values.global.namespace }}
+spec:
+  selector:
+    app: {{ $name | kebabcase }}
+  ports:
+    - port: {{ $svc.port }}
+      targetPort: {{ $svc.port }}
+      name: http
+{{- end }}
+{{- end }}
