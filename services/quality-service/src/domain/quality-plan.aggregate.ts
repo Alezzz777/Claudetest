@@ -1,152 +1,117 @@
 import { v4 as uuidv4 } from 'uuid';
 import { EventEnvelope, createEventEnvelope, MesEventType } from '@mes/shared';
 
-export type MeasurementResult = 'PASS' | 'FAIL' | 'CONDITIONAL';
-export type NcrSeverity = 'MINOR' | 'MAJOR' | 'CRITICAL';
+export type QualityPlanStatus = 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
 
-export interface QualityMeasurement {
-  measurementId: string;
-  characteristicId: string;
-  characteristicName: string;
-  nominalValue: number;
-  lowerLimit: number;
-  upperLimit: number;
-  actualValue: number;
+export interface MeasurementSpec {
+  parameterId: string;
+  name: string;
+  lsl: number;
+  usl: number;
   uom: string;
-  result: MeasurementResult;
-  operatorId: string;
-  measuredAt: Date;
 }
 
-export interface QualityMeasurementRecordedPayload {
+export interface QualityPlanCreatedPayload {
   planId: string;
-  orderId: string;
-  measurementId: string;
-  characteristicId: string;
-  actualValue: number;
-  lowerLimit: number;
-  upperLimit: number;
-  uom: string;
-  result: MeasurementResult;
-  operatorId: string;
-  measuredAt: string;
+  productCode: string;
+  specs: MeasurementSpec[];
+  createdBy: string;
+  createdAt: string;
 }
 
-export interface QualityNcrRaisedPayload {
+export interface QualityPlanActivatedPayload {
   planId: string;
-  ncrId: string;
-  orderId: string;
-  measurementId: string;
-  severity: NcrSeverity;
-  description: string;
-  raisedBy: string;
-  raisedAt: string;
+  activatedAt: string;
 }
 
-/**
- * QualityPlan aggregate — tracks inspection plans and measurements per ISA-88.
- * Event sourced: all measurements and NCRs are recorded as events.
- */
 export class QualityPlanAggregate {
   private _id: string;
-  private _orderId: string = '';
-  private _measurements: QualityMeasurement[] = [];
-  private _ncrIds: string[] = [];
+  _productCode: string = '';
+  _status: QualityPlanStatus = 'DRAFT';
+  _specs: MeasurementSpec[] = [];
   private _sequence: number = 0;
-  private _uncommittedEvents: EventEnvelope[] = [];
+  _uncommittedEvents: EventEnvelope[] = [];
 
-  constructor(id: string) { this._id = id; }
+  constructor(id: string) {
+    this._id = id;
+  }
 
-  static create(params: { orderId: string; recipeId: string; tenantId: string; correlationId?: string }): QualityPlanAggregate {
+  static create(params: {
+    productCode: string;
+    specs: MeasurementSpec[];
+    createdBy: string;
+    correlationId?: string;
+  }): QualityPlanAggregate {
     const id = uuidv4();
     const agg = new QualityPlanAggregate(id);
-    agg.applyAndRecord(createEventEnvelope({
+    const payload: QualityPlanCreatedPayload = {
+      planId: id,
+      productCode: params.productCode,
+      specs: params.specs,
+      createdBy: params.createdBy,
+      createdAt: new Date().toISOString(),
+    };
+    const event = createEventEnvelope({
       type: MesEventType.QUALITY_PLAN_CREATED,
       source: 'urn:mes:quality-service:QualityPlan',
       aggregateId: id,
       aggregateType: 'QualityPlan',
       sequence: 1,
-      data: { planId: id, orderId: params.orderId, recipeId: params.recipeId, tenantId: params.tenantId },
+      data: payload,
       correlationId: params.correlationId,
-    }));
+    });
+    agg.apply(event);
+    agg._uncommittedEvents.push(event);
     return agg;
   }
 
-  recordMeasurement(params: {
-    characteristicId: string;
-    characteristicName: string;
-    nominalValue: number;
-    lowerLimit: number;
-    upperLimit: number;
-    actualValue: number;
-    uom: string;
-    operatorId: string;
-    correlationId?: string;
-  }): void {
-    const measurementId = uuidv4();
-    const result: MeasurementResult =
-      params.actualValue >= params.lowerLimit && params.actualValue <= params.upperLimit
-        ? 'PASS' : 'FAIL';
-
-    const payload: QualityMeasurementRecordedPayload = {
+  activate(correlationId?: string): void {
+    if (this._status !== 'DRAFT') {
+      throw new Error(`Cannot activate plan in status ${this._status}`);
+    }
+    const payload: QualityPlanActivatedPayload = {
       planId: this._id,
-      orderId: this._orderId,
-      measurementId,
-      characteristicId: params.characteristicId,
-      actualValue: params.actualValue,
-      lowerLimit: params.lowerLimit,
-      upperLimit: params.upperLimit,
-      uom: params.uom,
-      result,
-      operatorId: params.operatorId,
-      measuredAt: new Date().toISOString(),
+      activatedAt: new Date().toISOString(),
     };
-    this.applyAndRecord(createEventEnvelope({
-      type: MesEventType.QUALITY_MEASUREMENT_RECORDED,
+    const event = createEventEnvelope({
+      type: MesEventType.QUALITY_PLAN_ACTIVATED,
       source: 'urn:mes:quality-service:QualityPlan',
       aggregateId: this._id,
       aggregateType: 'QualityPlan',
       sequence: this._sequence + 1,
       data: payload,
-      correlationId: params.correlationId,
-    }));
+      correlationId,
+    });
+    this.apply(event);
+    this._uncommittedEvents.push(event);
+  }
 
-    // Auto-raise NCR on critical failure
-    if (result === 'FAIL') {
-      const deviation = Math.abs(params.actualValue - params.nominalValue);
-      const tolerance = params.upperLimit - params.nominalValue;
-      const severity: NcrSeverity = deviation > tolerance * 2 ? 'CRITICAL' : 'MAJOR';
-      this.raiseNcr({ measurementId, severity, description: `Out-of-spec: ${params.characteristicName}`, raisedBy: params.operatorId, correlationId: params.correlationId });
+  validate(value: number, parameterId: string): { inSpec: boolean; lsl: number; usl: number } {
+    const spec = this._specs.find((s) => s.parameterId === parameterId);
+    if (!spec) {
+      throw new Error(`Parameter ${parameterId} not found in quality plan ${this._id}`);
     }
+    return {
+      inSpec: value >= spec.lsl && value <= spec.usl,
+      lsl: spec.lsl,
+      usl: spec.usl,
+    };
   }
 
-  private raiseNcr(params: { measurementId: string; severity: NcrSeverity; description: string; raisedBy: string; correlationId?: string }): void {
-    const ncrId = uuidv4();
-    this.applyAndRecord(createEventEnvelope({
-      type: MesEventType.QUALITY_NCR_RAISED,
-      source: 'urn:mes:quality-service:QualityPlan',
-      aggregateId: this._id,
-      aggregateType: 'QualityPlan',
-      sequence: this._sequence + 1,
-      data: { planId: this._id, ncrId, orderId: this._orderId, ...params, raisedAt: new Date().toISOString() } as QualityNcrRaisedPayload,
-      correlationId: params.correlationId,
-    }));
-  }
-
-  private applyAndRecord(envelope: EventEnvelope): void {
-    this.apply(envelope);
-    this._uncommittedEvents.push(envelope);
-  }
-
-  apply(envelope: EventEnvelope): void {
-    this._sequence = envelope.sequence;
-    if (envelope.type === MesEventType.QUALITY_PLAN_CREATED) {
-      const d = envelope.data as { orderId: string };
-      this._orderId = d.orderId;
-    }
-    if (envelope.type === MesEventType.QUALITY_NCR_RAISED) {
-      const d = envelope.data as QualityNcrRaisedPayload;
-      this._ncrIds.push(d.ncrId);
+  apply(event: EventEnvelope): void {
+    this._sequence = event.sequence;
+    switch (event.type) {
+      case MesEventType.QUALITY_PLAN_CREATED: {
+        const d = event.data as QualityPlanCreatedPayload;
+        this._productCode = d.productCode;
+        this._specs = d.specs;
+        this._status = 'DRAFT';
+        break;
+      }
+      case MesEventType.QUALITY_PLAN_ACTIVATED: {
+        this._status = 'ACTIVE';
+        break;
+      }
     }
   }
 
@@ -157,7 +122,15 @@ export class QualityPlanAggregate {
     return agg;
   }
 
+  popUncommittedEvents(): EventEnvelope[] {
+    const e = [...this._uncommittedEvents];
+    this._uncommittedEvents = [];
+    return e;
+  }
+
   get id(): string { return this._id; }
-  get ncrCount(): number { return this._ncrIds.length; }
-  popUncommittedEvents(): EventEnvelope[] { const e = [...this._uncommittedEvents]; this._uncommittedEvents = []; return e; }
+  get status(): QualityPlanStatus { return this._status; }
+  get productCode(): string { return this._productCode; }
+  get specs(): MeasurementSpec[] { return this._specs; }
+  get sequence(): number { return this._sequence; }
 }

@@ -16,4 +16,8 @@ export class KafkaProducerService implements OnModuleInit, OnModuleDestroy {
   async publish(topic: string, key: string, value: string): Promise<void> {
     await this.producer.send({ topic, messages: [{ key, value }] });
   }
+
+  async disconnect(): Promise<void> {
+    await this.producer.disconnect();
+  }
 }

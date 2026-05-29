@@ -6,34 +6,39 @@ export class GetInspectionResultsQuery {
   constructor(public readonly orderId: string) {}
 }
 
-export interface InspectionSummary {
-  planId: string;
+export interface MeasurementResult {
+  id: string;
   orderId: string;
-  totalMeasurements: number;
-  passCount: number;
-  failCount: number;
-  ncrCount: number;
-  qualityScore: number;
+  operationId: string;
+  parameterId: string;
+  value: number;
+  lsl: number;
+  usl: number;
+  inSpec: boolean;
+  recordedBy: string;
+  recordedAt: Date;
 }
 
 @QueryHandler(GetInspectionResultsQuery)
-export class GetInspectionResultsHandler implements IQueryHandler<GetInspectionResultsQuery, InspectionSummary> {
+export class GetInspectionResultsHandler implements IQueryHandler<GetInspectionResultsQuery, MeasurementResult[]> {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  async execute(query: GetInspectionResultsQuery): Promise<InspectionSummary> {
-    const row = await this.prisma.qualityPlanProjection.findFirstOrThrow({
+  async execute(query: GetInspectionResultsQuery): Promise<MeasurementResult[]> {
+    const rows = await this.prisma.measurementProjection.findMany({
       where: { orderId: query.orderId },
+      orderBy: { recordedAt: 'asc' },
     });
-    return {
-      planId: row.planId,
-      orderId: row.orderId,
-      totalMeasurements: row.totalMeasurements,
-      passCount: row.passCount,
-      failCount: row.failCount,
-      ncrCount: row.ncrCount,
-      qualityScore: row.totalMeasurements > 0
-        ? row.passCount / row.totalMeasurements
-        : 0,
-    };
+    return rows.map((r) => ({
+      id: r.id,
+      orderId: r.orderId,
+      operationId: r.operationId,
+      parameterId: r.parameterId,
+      value: r.value,
+      lsl: r.lsl,
+      usl: r.usl,
+      inSpec: r.inSpec,
+      recordedBy: r.recordedBy,
+      recordedAt: r.recordedAt,
+    }));
   }
 }

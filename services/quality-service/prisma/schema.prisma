@@ -14,7 +14,7 @@ model EventStore {
   eventType     String
   sequence      Int
   payload       Json
-  correlationId String
+  correlationId String?
   causationId   String?
   createdAt     DateTime @default(now())
 
@@ -23,58 +23,63 @@ model EventStore {
   @@map("event_store")
 }
 
-model Outbox {
-  id            String    @id
-  eventType     String
-  aggregateType String
-  aggregateId   String
-  payload       Json
-  topic         String
-  partitionKey  String
-  status        String    @default("PENDING")
-  attempts      Int       @default(0)
-  createdAt     DateTime  @default(now())
-  processedAt   DateTime?
-  lastError     String?
+model OutboxEvent {
+  id           String    @id @default(uuid())
+  topic        String
+  partitionKey String
+  payload      Json
+  sent         Boolean   @default(false)
+  createdAt    DateTime  @default(now())
 
-  @@index([status, attempts])
-  @@map("outbox")
+  @@index([sent, createdAt])
+  @@map("outbox_events")
 }
 
 model ProcessedEvent {
   eventId     String   @id
-  processedAt DateTime
+  processedAt DateTime @default(now())
   @@map("processed_events")
 }
 
 model QualityPlanProjection {
-  planId            String   @id
-  orderId           String
-  totalMeasurements Int      @default(0)
-  passCount         Int      @default(0)
-  failCount         Int      @default(0)
-  ncrCount          Int      @default(0)
-  status            String   @default("ACTIVE")
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  planId      String   @id
+  productCode String
+  status      String
+  specJson    Json
+  createdAt   DateTime
+  updatedAt   DateTime @updatedAt
 
-  @@index([orderId])
   @@map("quality_plan_projections")
 }
 
-model NcrProjection {
-  ncrId       String   @id
-  planId      String
+model MeasurementProjection {
+  id          String   @id @default(uuid())
   orderId     String
-  severity    String
-  status      String   @default("OPEN")
+  operationId String
+  parameterId String
+  value       Float
+  lsl         Float
+  usl         Float
+  inSpec      Boolean
+  recordedBy  String
+  recordedAt  DateTime
+
+  @@index([orderId])
+  @@index([inSpec])
+  @@map("measurement_projections")
+}
+
+model NonConformanceProjection {
+  ncId        String    @id
+  orderId     String
+  lotId       String?
   description String
+  status      String
   raisedBy    String
   raisedAt    DateTime
   closedAt    DateTime?
-  updatedAt   DateTime @updatedAt
 
   @@index([orderId])
   @@index([status])
-  @@map("ncr_projections")
+  @@map("nonconformance_projections")
 }

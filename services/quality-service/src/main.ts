@@ -12,7 +12,7 @@ async function bootstrap(): Promise<void> {
 
   const config = new DocumentBuilder()
     .setTitle('Quality Service API')
-    .setDescription('Quality plans, measurement recording and NCR management (PS-QC)')
+    .setDescription('Quality plans, measurement recording and non-conformance management (PS-QC)')
     .setVersion('1.0.0')
     .addBearerAuth()
     .build();
