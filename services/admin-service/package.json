@@ -22,6 +22,8 @@
     "@nestjs/schedule": "^4.0.1",
     "@nestjs/swagger": "^7.3.0",
     "@prisma/client": "^5.11.0",
+    "class-validator": "^0.14.1",
+    "class-transformer": "^0.5.1",
     "kafkajs": "^2.2.4",
     "reflect-metadata": "^0.2.1",
     "rxjs": "^7.8.1",

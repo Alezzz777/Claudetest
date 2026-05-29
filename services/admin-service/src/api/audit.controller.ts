@@ -1,20 +1,22 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { QueryBus } from '@nestjs/cqrs';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { GetAuditLogQuery, AuditLogEntry } from '../application/queries/get-audit-log.handler';
 
-@ApiTags('admin-audit')
+@ApiTags('audit')
 @ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 @Controller('audit')
 export class AuditController {
   constructor(private readonly queryBus: QueryBus) {}
 
   @Get()
-  @ApiOperation({ summary: 'Paginated audit log query' })
+  @ApiOperation({ summary: 'Query audit log' })
   @ApiQuery({ name: 'aggregateId', required: false })
-  @ApiQuery({ name: 'from', required: false })
-  @ApiQuery({ name: 'to', required: false })
-  @ApiQuery({ name: 'limit', required: false })
+  @ApiQuery({ name: 'from', required: false, type: String })
+  @ApiQuery({ name: 'to', required: false, type: String })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
   async getAuditLog(
     @Query('aggregateId') aggregateId?: string,
     @Query('from') from?: string,
@@ -26,7 +28,7 @@ export class AuditController {
         aggregateId,
         from ? new Date(from) : undefined,
         to ? new Date(to) : undefined,
-        limit ? parseInt(limit, 10) : 50,
+        limit ? +limit : 50,
       ),
     );
   }

@@ -7,7 +7,7 @@ export class GetAuditLogQuery {
     public readonly aggregateId?: string,
     public readonly from?: Date,
     public readonly to?: Date,
-    public readonly limit = 50,
+    public readonly limit: number = 50,
   ) {}
 }
 
@@ -17,39 +17,33 @@ export interface AuditLogEntry {
   aggregateType: string;
   aggregateId: string;
   correlationId: string;
-  source: string;
-  payload: Record<string, unknown>;
   occurredAt: Date;
 }
 
 @QueryHandler(GetAuditLogQuery)
-export class GetAuditLogHandler implements IQueryHandler<GetAuditLogQuery, AuditLogEntry[]> {
+export class GetAuditLogHandler implements IQueryHandler<GetAuditLogQuery> {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  async execute(q: GetAuditLogQuery): Promise<AuditLogEntry[]> {
+  async execute(query: GetAuditLogQuery): Promise<AuditLogEntry[]> {
     const where: Record<string, unknown> = {};
-    if (q.aggregateId) where['aggregateId'] = q.aggregateId;
-    if (q.from || q.to) {
+    if (query.aggregateId) where['aggregateId'] = query.aggregateId;
+    if (query.from || query.to) {
       where['occurredAt'] = {
-        ...(q.from && { gte: q.from }),
-        ...(q.to && { lte: q.to }),
+        ...(query.from ? { gte: query.from } : {}),
+        ...(query.to ? { lte: query.to } : {}),
       };
     }
-
     const rows = await this.prisma.auditLog.findMany({
       where,
       orderBy: { occurredAt: 'desc' },
-      take: q.limit,
+      take: Math.min(query.limit, 200),
     });
-
     return rows.map((r) => ({
       id: r.id,
       eventType: r.eventType,
       aggregateType: r.aggregateType,
       aggregateId: r.aggregateId,
       correlationId: r.correlationId,
-      source: r.source,
-      payload: r.payload as Record<string, unknown>,
       occurredAt: r.occurredAt,
     }));
   }

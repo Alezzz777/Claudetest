@@ -1,8 +1,8 @@
 import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 import { Inject, Logger, NotFoundException } from '@nestjs/common';
+import { EventEnvelope, envelopeToKafkaKey, OutboxStatus } from '@mes/shared';
 import { PrismaService } from '../../infrastructure/persistence/prisma.service';
 import { UserAggregate } from '../../domain/user.aggregate';
-import { EventEnvelope, envelopeToKafkaKey, OutboxStatus } from '@mes/shared';
 import { DeactivateUserCommand } from './deactivate-user.command';
 
 @CommandHandler(DeactivateUserCommand)
@@ -16,23 +16,20 @@ export class DeactivateUserHandler implements ICommandHandler<DeactivateUserComm
       where: { aggregateId: cmd.userId },
       orderBy: { sequence: 'asc' },
     });
-
-    if (rows.length === 0) {
-      throw new NotFoundException(`User ${cmd.userId} not found`);
-    }
+    if (rows.length === 0) throw new NotFoundException(`User ${cmd.userId} not found`);
 
     const user = UserAggregate.rehydrate(rows.map((r) => r.payload as unknown as EventEnvelope));
     user.deactivate(cmd.correlationId);
+    const events = user.popUncommittedEvents();
 
-    const newEvents = user.popUncommittedEvents();
-    if (newEvents.length === 0) {
-      this.logger.debug(`User ${cmd.userId} already inactive, skipping`);
+    if (events.length === 0) {
+      this.logger.debug(`User ${cmd.userId} is already inactive, noop`);
       return;
     }
 
     await this.prisma.$transaction(async (tx) => {
       await tx.eventStore.createMany({
-        data: newEvents.map((e) => ({
+        data: events.map((e) => ({
           id: e.id,
           aggregateId: e.aggregateId,
           aggregateType: e.aggregateType,
@@ -44,15 +41,14 @@ export class DeactivateUserHandler implements ICommandHandler<DeactivateUserComm
           createdAt: new Date(e.time),
         })),
       });
-
       await tx.outbox.createMany({
-        data: newEvents.map((e) => ({
+        data: events.map((e) => ({
           id: `${e.id}-outbox`,
           eventType: e.type,
           aggregateType: e.aggregateType,
           aggregateId: e.aggregateId,
           payload: e as unknown as Record<string, unknown>,
-          topic: e.type,
+          topic: 'mes.admin.audit',
           partitionKey: envelopeToKafkaKey(e),
           status: OutboxStatus.PENDING,
           attempts: 0,
@@ -61,7 +57,6 @@ export class DeactivateUserHandler implements ICommandHandler<DeactivateUserComm
           lastError: null,
         })),
       });
-
       await tx.userProjection.update({
         where: { userId: cmd.userId },
         data: { isActive: false },

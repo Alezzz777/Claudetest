@@ -1,20 +1,21 @@
-import { Controller, Get, Post, Param, Body, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Get, Param, Body, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { SchemaRegistryService } from '../infrastructure/schema-registry/schema-registry.service';
 
 class RegisterSchemaDto {
   schema!: object;
 }
 
-@ApiTags('admin-schemas')
+@ApiTags('schemas')
 @ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 @Controller('schemas')
 export class SchemaController {
   constructor(private readonly schemaRegistry: SchemaRegistryService) {}
 
   @Post(':subject')
-  @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Register a schema for a subject' })
+  @ApiOperation({ summary: 'Register a new schema version' })
   async registerSchema(
     @Param('subject') subject: string,
     @Body() dto: RegisterSchemaDto,
@@ -24,8 +25,8 @@ export class SchemaController {
   }
 
   @Get(':subject/latest')
-  @ApiOperation({ summary: 'Get the latest schema for a subject' })
-  async getLatestSchema(
+  @ApiOperation({ summary: 'Get latest schema for a subject' })
+  async getLatest(
     @Param('subject') subject: string,
   ): Promise<{ version: number; schema: object } | null> {
     return this.schemaRegistry.getLatestSchema(subject);
@@ -36,8 +37,8 @@ export class SchemaController {
   async checkCompatibility(
     @Param('subject') subject: string,
     @Body() dto: RegisterSchemaDto,
-  ): Promise<{ is_compatible: boolean }> {
-    const compatible = await this.schemaRegistry.checkCompatibility(subject, dto.schema);
-    return { is_compatible: compatible };
+  ): Promise<{ isCompatible: boolean }> {
+    const isCompatible = await this.schemaRegistry.checkCompatibility(subject, dto.schema);
+    return { isCompatible };
   }
 }

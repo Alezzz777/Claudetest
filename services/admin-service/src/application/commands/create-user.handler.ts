@@ -1,8 +1,8 @@
 import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 import { Inject, Logger, ConflictException } from '@nestjs/common';
+import { EventEnvelope, envelopeToKafkaKey, OutboxStatus } from '@mes/shared';
 import { PrismaService } from '../../infrastructure/persistence/prisma.service';
 import { UserAggregate } from '../../domain/user.aggregate';
-import { EventEnvelope, envelopeToKafkaKey, OutboxStatus } from '@mes/shared';
 import { CreateUserCommand } from './create-user.command';
 
 @CommandHandler(CreateUserCommand)
@@ -11,18 +11,18 @@ export class CreateUserHandler implements ICommandHandler<CreateUserCommand> {
 
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  async execute(cmd: CreateUserCommand): Promise<{ userId: string }> {
-    // Idempotency: check if user with same keycloakId already exists
+  async execute(cmd: CreateUserCommand): Promise<string> {
+    // Idempotency: check if a user with this keycloakId already exists
     const existing = await this.prisma.eventStore.findFirst({
-      where: {
-        aggregateType: 'User',
-        payload: { path: ['data', 'keycloakId'], equals: cmd.keycloakId },
-      },
+      where: { aggregateType: 'User', eventType: 'admin.user.created' },
     });
-    if (existing) {
-      const aggregateId = existing.aggregateId;
-      this.logger.warn(`User with keycloakId ${cmd.keycloakId} already exists (aggregateId=${aggregateId})`);
-      return { userId: aggregateId };
+    // More precise check via projection
+    const existingProjection = await this.prisma.userProjection.findUnique({
+      where: { keycloakId: cmd.keycloakId },
+    });
+    if (existingProjection) {
+      this.logger.warn(`User with keycloakId ${cmd.keycloakId} already exists`);
+      return existingProjection.userId;
     }
 
     const user = UserAggregate.create({
@@ -33,11 +33,11 @@ export class CreateUserHandler implements ICommandHandler<CreateUserCommand> {
       correlationId: cmd.correlationId,
     });
 
-    const newEvents = user.popUncommittedEvents();
+    const events = user.popUncommittedEvents();
 
     await this.prisma.$transaction(async (tx) => {
       await tx.eventStore.createMany({
-        data: newEvents.map((e) => ({
+        data: events.map((e) => ({
           id: e.id,
           aggregateId: e.aggregateId,
           aggregateType: e.aggregateType,
@@ -49,9 +49,8 @@ export class CreateUserHandler implements ICommandHandler<CreateUserCommand> {
           createdAt: new Date(e.time),
         })),
       });
-
       await tx.outbox.createMany({
-        data: newEvents.map((e) => ({
+        data: events.map((e) => ({
           id: `${e.id}-outbox`,
           eventType: e.type,
           aggregateType: e.aggregateType,
@@ -66,16 +65,16 @@ export class CreateUserHandler implements ICommandHandler<CreateUserCommand> {
           lastError: null,
         })),
       });
-
-      // Upsert into user_projections read model
+      // Eagerly update projection (also updated by event handler via Kafka)
+      const payload = events[0]!.data as any;
       await tx.userProjection.upsert({
         where: { userId: user.id },
         create: {
           userId: user.id,
-          email: cmd.email,
-          displayName: cmd.displayName,
-          keycloakId: cmd.keycloakId,
-          tenantId: cmd.tenantId,
+          email: payload.email,
+          displayName: payload.displayName,
+          keycloakId: payload.keycloakId,
+          tenantId: payload.tenantId,
           roles: [],
           isActive: true,
         },
@@ -84,6 +83,6 @@ export class CreateUserHandler implements ICommandHandler<CreateUserCommand> {
     });
 
     this.logger.log(`User created: ${user.id} (${cmd.email})`);
-    return { userId: user.id };
+    return user.id;
   }
 }

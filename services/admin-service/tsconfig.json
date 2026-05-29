@@ -3,7 +3,9 @@
   "compilerOptions": {
     "rootDir": "./src",
     "outDir": "./dist",
-    "paths": { "@mes/shared": ["../../packages/shared/src"] }
+    "paths": {
+      "@mes/shared": ["../../packages/shared/src/index.ts"]
+    }
   },
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "dist"]

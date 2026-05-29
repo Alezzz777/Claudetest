@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { Kafka, Consumer, EachMessagePayload } from 'kafkajs';
 import { EventEnvelope, MesEventType } from '@mes/shared';
 import { AuditLogWrittenHandler } from '../../application/events/audit-log-written.handler';
@@ -22,17 +22,30 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleInit(): Promise<void> {
     const kafka = new Kafka({
-      clientId: 'admin-service',
+      clientId: process.env['KAFKA_CLIENT_ID'] ?? 'admin-service',
       brokers: (process.env['KAFKA_BROKERS'] ?? 'localhost:9092').split(','),
     });
     this.consumer = kafka.consumer({ groupId: 'admin-service-audit' });
     await this.consumer.connect();
 
-    // Subscribe to all MES topics using regex for cross-service audit trail
-    await this.consumer.subscribe({ topics: /^mes\./, fromBeginning: false });
+    // Subscribe to all MES topics to build cross-service audit trail
+    await this.consumer.subscribe({
+      topics: [
+        'mes.production.orders',
+        'mes.quality.measurements',
+        'mes.quality.nonconformances',
+        'mes.maintenance.equipment',
+        'mes.maintenance.workorders',
+        'mes.inventory.lots',
+        'mes.recipe.versions',
+        'mes.scheduling.orders',
+        'mes.admin.audit',
+      ],
+      fromBeginning: false,
+    });
 
     await this.consumer.run({ eachMessage: this.handle.bind(this) });
-    this.logger.log('Kafka consumer connected and subscribed to mes.* topics');
+    this.logger.log('Kafka consumer connected (audit group)');
   }
 
   async onModuleDestroy(): Promise<void> {
@@ -43,14 +56,12 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
     if (!message.value) return;
     try {
       const envelope = JSON.parse(message.value.toString()) as EventEnvelope;
-      // All events go to the audit trail
       await this.auditHandler.handle(envelope);
-      // User-related events update the read model projection
       if (USER_EVENT_TYPES.has(envelope.type)) {
         await this.userProjectionHandler.handleIdempotent(envelope);
       }
     } catch (err) {
-      this.logger.error(`Failed to handle Kafka message: ${err}`);
+      this.logger.error(`Error handling Kafka message: ${err}`);
     }
   }
 }

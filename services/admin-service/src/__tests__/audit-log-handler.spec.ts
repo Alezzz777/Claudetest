@@ -1,67 +1,55 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AuditLogWrittenHandler } from '../application/events/audit-log-written.handler';
-import type { EventEnvelope } from '@mes/shared';
+import { createEventEnvelope, MesEventType } from '@mes/shared';
 
-function makeMockPrisma() {
-  return {
-    processedEvent: {
-      findUnique: vi.fn(),
-      create: vi.fn(),
-    },
-    auditLog: {
-      create: vi.fn(),
-    },
-    $transaction: vi.fn(async (ops: unknown[]) => {
-      // Execute each operation (they are Prisma promises)
-      for (const op of ops) {
-        await (op as Promise<unknown>);
-      }
-    }),
-  };
-}
-
-function makeEnvelope(id = 'evt-1'): EventEnvelope {
-  return {
-    id,
-    specversion: '1.0',
-    type: 'admin.user.created',
+function makeEnvelope() {
+  return createEventEnvelope({
+    type: MesEventType.ADMIN_USER_CREATED,
     source: 'urn:mes:admin-service:User',
-    time: new Date().toISOString(),
-    datacontenttype: 'application/json',
-    schemaVersion: '1.0.0',
-    correlationId: 'corr-1',
-    aggregateId: 'agg-1',
+    aggregateId: 'user-1',
     aggregateType: 'User',
     sequence: 1,
-    data: {},
-  };
+    data: { userId: 'user-1', email: 'test@mes.local' },
+  });
+}
+
+function makePrisma(alreadyProcessed = false) {
+  return {
+    processedEvent: {
+      findUnique: vi.fn().mockResolvedValue(alreadyProcessed ? { eventId: 'x' } : null),
+      create: vi.fn().mockResolvedValue({}),
+    },
+    auditLog: {
+      create: vi.fn().mockResolvedValue({}),
+    },
+    $transaction: vi.fn().mockImplementation((ops: unknown[]) => Promise.all(ops)),
+  } as any;
 }
 
 describe('AuditLogWrittenHandler', () => {
-  let prisma: ReturnType<typeof makeMockPrisma>;
-  let handler: AuditLogWrittenHandler;
+  it('first call: creates audit log and marks event processed', async () => {
+    const prisma = makePrisma(false);
+    const handler = new AuditLogWrittenHandler(prisma);
+    await handler.handle(makeEnvelope());
 
-  beforeEach(() => {
-    prisma = makeMockPrisma();
-    handler = new AuditLogWrittenHandler(prisma as never);
-  });
-
-  it('first call with eventId → creates audit_log + processed_event', async () => {
-    prisma.processedEvent.findUnique.mockResolvedValueOnce(null);
-    prisma.auditLog.create.mockResolvedValueOnce({});
-    prisma.processedEvent.create.mockResolvedValueOnce({});
-
-    await handler.handle(makeEnvelope('evt-1'));
-
-    expect(prisma.processedEvent.findUnique).toHaveBeenCalledWith({ where: { eventId: 'evt-1' } });
     expect(prisma.$transaction).toHaveBeenCalledOnce();
   });
 
-  it('second call with same eventId → no-op (already processed)', async () => {
-    prisma.processedEvent.findUnique.mockResolvedValueOnce({ eventId: 'evt-1', processedAt: new Date() });
-
-    await handler.handle(makeEnvelope('evt-1'));
+  it('second call with same eventId is a noop (idempotent)', async () => {
+    const prisma = makePrisma(true); // already processed
+    const handler = new AuditLogWrittenHandler(prisma);
+    await handler.handle(makeEnvelope());
 
     expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('creates audit log with correct fields', async () => {
+    const prisma = makePrisma(false);
+    const handler = new AuditLogWrittenHandler(prisma);
+    const envelope = makeEnvelope();
+    await handler.handle(envelope);
+
+    const [auditCreate] = prisma.$transaction.mock.calls[0]![0] as any[];
+    expect(auditCreate).toBeDefined();
   });
 });

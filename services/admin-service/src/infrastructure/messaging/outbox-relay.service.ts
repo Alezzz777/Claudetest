@@ -1,14 +1,9 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
-import { Cron } from '@nestjs/schedule';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../persistence/prisma.service';
 import { KafkaProducerService } from './kafka-producer.service';
 import { OutboxStatus, OUTBOX_MAX_ATTEMPTS, OUTBOX_BATCH_SIZE } from '@mes/shared';
 
-/**
- * Outbox relay — polls the outbox table every 500ms and publishes pending events to Kafka.
- * Includes an overlap guard to prevent concurrent runs.
- * After OUTBOX_MAX_ATTEMPTS failures, entries are moved to DEAD_LETTER status.
- */
 @Injectable()
 export class OutboxRelayService {
   private readonly logger = new Logger(OutboxRelayService.name);
@@ -19,7 +14,7 @@ export class OutboxRelayService {
     @Inject(KafkaProducerService) private readonly kafka: KafkaProducerService,
   ) {}
 
-  @Cron('*/1 * * * * *') // every second (CronExpression.EVERY_SECOND)
+  @Cron(CronExpression.EVERY_SECOND)
   async relay(): Promise<void> {
     if (this.isRunning) return;
     this.isRunning = true;
@@ -41,7 +36,16 @@ export class OutboxRelayService {
 
     for (const row of rows) {
       try {
-        await this.kafka.publish(row.topic, row.partitionKey, JSON.stringify(row.payload));
+        await this.kafka.publish({
+          topic: row.topic,
+          key: row.partitionKey,
+          value: JSON.stringify(row.payload),
+          headers: {
+            eventType: row.eventType,
+            aggregateType: row.aggregateType,
+            aggregateId: row.aggregateId,
+          },
+        });
         await this.prisma.outbox.update({
           where: { id: row.id },
           data: { status: OutboxStatus.PUBLISHED, processedAt: new Date() },
@@ -49,7 +53,7 @@ export class OutboxRelayService {
       } catch (err) {
         const newAttempts = row.attempts + 1;
         const isDead = newAttempts >= OUTBOX_MAX_ATTEMPTS;
-        this.logger.error(`Failed to publish outbox entry ${row.id} (attempt ${newAttempts}): ${err}`);
+        this.logger.error(`Outbox relay failed for ${row.id} (attempt ${newAttempts}): ${err}`);
         await this.prisma.outbox.update({
           where: { id: row.id },
           data: {
@@ -61,6 +65,6 @@ export class OutboxRelayService {
       }
     }
 
-    this.logger.debug(`Outbox relay processed ${rows.length} row(s)`);
+    this.logger.debug(`Outbox relay processed ${rows.length} entry(ies)`);
   }
 }

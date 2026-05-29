@@ -2,96 +2,94 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { UserAggregate } from '../domain/user.aggregate';
 import { MesEventType } from '@mes/shared';
 
-const baseParams = {
-  email: 'test@example.com',
+const BASE = {
+  email: 'test@mes.local',
   displayName: 'Test User',
   keycloakId: 'kc-123',
   tenantId: 'tenant-1',
-  correlationId: 'corr-1',
 };
 
 describe('UserAggregate', () => {
-  it('create() produces 1 uncommitted event of type ADMIN_USER_CREATED', () => {
-    const user = UserAggregate.create(baseParams);
+  it('create() produces 1 uncommitted UserCreated event', () => {
+    const user = UserAggregate.create(BASE);
     const events = user.popUncommittedEvents();
     expect(events).toHaveLength(1);
     expect(events[0]!.type).toBe(MesEventType.ADMIN_USER_CREATED);
+    expect((events[0]!.data as any).email).toBe(BASE.email);
   });
 
-  it('assignRole() idempotency: assigning same role twice → 1 event total', () => {
-    const user = UserAggregate.create(baseParams);
-    user.popUncommittedEvents(); // clear create event
+  it('version is 1 after create()', () => {
+    const user = UserAggregate.create(BASE);
+    expect(user.getVersion()).toBe(1);
+  });
 
-    user.assignRole('ADMIN', 'GLOBAL', null, 'system');
-    user.assignRole('ADMIN', 'GLOBAL', null, 'system'); // same role
+  it('assignRole() emits RoleAssigned event', () => {
+    const user = UserAggregate.create(BASE);
+    user.popUncommittedEvents(); // clear
+    user.assignRole('OPERATOR', 'GLOBAL', null, 'admin');
     const events = user.popUncommittedEvents();
     expect(events).toHaveLength(1);
     expect(events[0]!.type).toBe(MesEventType.ADMIN_USER_ROLE_ASSIGNED);
+    expect(user.roles).toContain('OPERATOR');
+  });
+
+  it('assignRole() is idempotent — same role twice emits 1 event total', () => {
+    const user = UserAggregate.create(BASE);
+    user.popUncommittedEvents();
+    user.assignRole('OPERATOR', 'GLOBAL', null, 'admin');
+    user.assignRole('OPERATOR', 'GLOBAL', null, 'admin'); // duplicate
+    expect(user.popUncommittedEvents()).toHaveLength(1);
+    expect(user.roles).toEqual(['OPERATOR']);
   });
 
   it('assignRole() different roles → 2 events', () => {
-    const user = UserAggregate.create(baseParams);
+    const user = UserAggregate.create(BASE);
     user.popUncommittedEvents();
-
-    user.assignRole('ADMIN', 'GLOBAL', null, 'system');
-    user.assignRole('OPERATOR', 'GLOBAL', null, 'system');
-    const events = user.popUncommittedEvents();
-    expect(events).toHaveLength(2);
+    user.assignRole('OPERATOR', 'GLOBAL', null, 'admin');
+    user.assignRole('DISPATCHER', 'GLOBAL', null, 'admin');
+    expect(user.popUncommittedEvents()).toHaveLength(2);
   });
 
-  it('deactivate() on active user → emits ADMIN_USER_DEACTIVATED', () => {
-    const user = UserAggregate.create(baseParams);
+  it('deactivate() on active user emits Deactivated event', () => {
+    const user = UserAggregate.create(BASE);
     user.popUncommittedEvents();
-
-    user.deactivate('corr-2');
+    user.deactivate();
     const events = user.popUncommittedEvents();
     expect(events).toHaveLength(1);
     expect(events[0]!.type).toBe(MesEventType.ADMIN_USER_DEACTIVATED);
     expect(user.isActive).toBe(false);
   });
 
-  it('deactivate() on already-deactivated user → no new event (noop)', () => {
-    const user = UserAggregate.create(baseParams);
+  it('deactivate() on already-inactive user is a noop', () => {
+    const user = UserAggregate.create(BASE);
     user.popUncommittedEvents();
-
-    user.deactivate('corr-2');
-    user.popUncommittedEvents(); // clear deactivate event
-
-    user.deactivate('corr-3');
-    const events = user.popUncommittedEvents();
-    expect(events).toHaveLength(0);
+    user.deactivate();
+    user.popUncommittedEvents(); // clear
+    user.deactivate(); // second call
+    expect(user.popUncommittedEvents()).toHaveLength(0);
   });
 
-  it('rehydrate() restores roles and isActive', () => {
-    const original = UserAggregate.create(baseParams);
+  it('rehydrate() restores state from event history', () => {
+    const original = UserAggregate.create(BASE);
     original.assignRole('ADMIN', 'GLOBAL', null, 'system');
-    original.deactivate('corr-x');
+    original.deactivate();
+    const history = original.popUncommittedEvents();
 
-    const allEvents = original.popUncommittedEvents();
-
-    const restored = UserAggregate.rehydrate(allEvents);
+    const restored = UserAggregate.rehydrate(history);
+    expect(restored.email).toBe(BASE.email);
     expect(restored.roles).toContain('ADMIN');
     expect(restored.isActive).toBe(false);
-    expect(restored.email).toBe(baseParams.email);
+    expect(restored.popUncommittedEvents()).toHaveLength(0); // rehydrate clears uncommitted
   });
 
-  it('version increments correctly with each event', () => {
-    const user = UserAggregate.create(baseParams);
+  it('getVersion() tracks each applied event', () => {
+    const user = UserAggregate.create(BASE);
     expect(user.getVersion()).toBe(1);
-
-    user.assignRole('ADMIN', 'GLOBAL', null, 'system');
+    user.assignRole('OPERATOR', 'GLOBAL', null, 'admin');
     expect(user.getVersion()).toBe(2);
-
     user.deactivate();
     expect(user.getVersion()).toBe(3);
-  });
-
-  it('popUncommittedEvents() clears the queue', () => {
-    const user = UserAggregate.create(baseParams);
-    const first = user.popUncommittedEvents();
-    expect(first).toHaveLength(1);
-
-    const second = user.popUncommittedEvents();
-    expect(second).toHaveLength(0);
+    user.popUncommittedEvents();
+    expect(user.getVersion()).toBe(3); // pop doesn't change version
   });
 });
