@@ -115,3 +115,19 @@ model SagaInstance {
   @@index([correlationId])
   @@map("saga_instances")
 }
+
+// ─── Genealogy ────────────────────────────────────────────────────────────────
+
+model GenealogyNode {
+  id          String   @id @default(uuid())
+  orderId     String
+  nodeType    String   // 'ORDER' | 'OPERATION' | 'MATERIAL'
+  nodeId      String
+  parentId    String?
+  data        Json
+  createdAt   DateTime @default(now())
+
+  @@index([orderId])
+  @@index([nodeId])
+  @@map("genealogy_nodes")
+}
