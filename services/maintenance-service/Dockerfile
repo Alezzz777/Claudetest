@@ -1,27 +1,31 @@
 FROM node:20-alpine AS base
 WORKDIR /app
-RUN apk add --no-cache openssl
 
-FROM base AS deps
-COPY package*.json ./
-COPY packages/shared/package*.json ./packages/shared/
-COPY services/maintenance-service/package*.json ./services/maintenance-service/
-RUN npm ci --workspace=packages/shared --workspace=services/maintenance-service
+# Copy root workspace files
+COPY package.json package-lock.json* tsconfig.base.json ./
+COPY packages/ ./packages/
 
-FROM base AS builder
-COPY --from=deps /app/node_modules ./node_modules
-COPY tsconfig.base.json ./
-COPY packages/shared ./packages/shared
-COPY services/maintenance-service ./services/maintenance-service
-RUN npm run build --workspace=packages/shared
-RUN npm run build --workspace=services/maintenance-service
-RUN cd services/maintenance-service && npx prisma generate
+# Copy service files
+COPY services/maintenance-service/ ./services/maintenance-service/
 
-FROM base AS runtime
-ENV NODE_ENV=production
-COPY --from=builder /app/services/maintenance-service/dist ./dist
-COPY --from=builder /app/services/maintenance-service/prisma ./prisma
-COPY --from=builder /app/node_modules ./node_modules
+# Install all workspace deps from root
+RUN npm install --ignore-scripts
 
-EXPOSE 3003
-CMD ["node", "dist/main.js"]
+# Generate Prisma client
+WORKDIR /app/services/maintenance-service
+RUN npx prisma generate
+
+# Build
+RUN npm run build
+
+# Runtime
+FROM node:20-alpine
+WORKDIR /app
+COPY --from=base /app/node_modules ./node_modules
+COPY --from=base /app/packages ./packages
+COPY --from=base /app/services/maintenance-service/dist ./services/maintenance-service/dist
+COPY --from=base /app/services/maintenance-service/prisma ./services/maintenance-service/prisma
+COPY --from=base /app/services/maintenance-service/node_modules ./services/maintenance-service/node_modules
+WORKDIR /app/services/maintenance-service
+EXPOSE 3006
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/main"]

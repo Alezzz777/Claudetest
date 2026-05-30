@@ -1,27 +1,16 @@
-FROM node:20-alpine AS base
+FROM node:20-alpine AS build
 WORKDIR /app
-
-FROM base AS deps
-COPY package*.json ./
-COPY services/web-app/package*.json ./services/web-app/
-RUN npm ci --workspace=services/web-app
-
-FROM base AS builder
-COPY --from=deps /app/node_modules ./node_modules
-COPY services/web-app ./services/web-app
+COPY services/web-app/package.json services/web-app/package-lock.json* ./
+RUN npm install
+COPY services/web-app/ .
 ARG VITE_API_GATEWAY_URL
-ARG VITE_SSE_URL
-ARG VITE_WS_URL
 ARG VITE_KEYCLOAK_URL
 ARG VITE_KEYCLOAK_REALM
 ARG VITE_KEYCLOAK_CLIENT_ID
-ENV VITE_API_GATEWAY_URL=$VITE_API_GATEWAY_URL
-ENV VITE_KEYCLOAK_URL=$VITE_KEYCLOAK_URL
-ENV VITE_KEYCLOAK_REALM=$VITE_KEYCLOAK_REALM
-RUN npm run build --workspace=services/web-app
+RUN npm run build
 
-FROM nginx:alpine AS runtime
-COPY --from=builder /app/services/web-app/dist /usr/share/nginx/html
-COPY services/web-app/nginx.conf /etc/nginx/conf.d/default.conf
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
+FROM node:20-alpine
+RUN npm install -g serve
+COPY --from=build /app/dist ./dist
+EXPOSE 3000
+CMD ["serve", "-s", "dist", "-l", "3000"]

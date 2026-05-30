@@ -13,6 +13,8 @@ async function bootstrap(): Promise<void> {
     .setTitle('Inventory Service API').setDescription('WIP lot tracking, material movements and reservations (PS-IN)')
     .setVersion('1.0.0').addBearerAuth().build();
   SwaggerModule.setup('api/v1/docs', app, SwaggerModule.createDocument(app, config));
+  const fastify = app.getHttpAdapter().getInstance();
+  fastify.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
   await app.listen(process.env['PORT'] ?? 3004, '0.0.0.0');
 }
 bootstrap().catch(console.error);

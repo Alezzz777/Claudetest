@@ -1,26 +1,31 @@
 FROM node:20-alpine AS base
 WORKDIR /app
-RUN apk add --no-cache openssl
 
-FROM base AS deps
-COPY package*.json ./
-COPY packages/shared/package*.json ./packages/shared/
-COPY services/inventory-service/package*.json ./services/inventory-service/
-RUN npm ci --workspace=packages/shared --workspace=services/inventory-service
+# Copy root workspace files
+COPY package.json package-lock.json* tsconfig.base.json ./
+COPY packages/ ./packages/
 
-FROM base AS builder
-COPY --from=deps /app/node_modules ./node_modules
-COPY tsconfig.base.json ./
-COPY packages/shared ./packages/shared
-COPY services/inventory-service ./services/inventory-service
-RUN npm run build --workspace=packages/shared && npm run build --workspace=services/inventory-service
-RUN cd services/inventory-service && npx prisma generate
+# Copy service files
+COPY services/inventory-service/ ./services/inventory-service/
 
-FROM base AS runtime
-ENV NODE_ENV=production
-COPY --from=builder /app/services/inventory-service/dist ./dist
-COPY --from=builder /app/services/inventory-service/prisma ./prisma
-COPY --from=builder /app/node_modules ./node_modules
+# Install all workspace deps from root
+RUN npm install --ignore-scripts
 
-EXPOSE 3004
-CMD ["node", "dist/main.js"]
+# Generate Prisma client
+WORKDIR /app/services/inventory-service
+RUN npx prisma generate
+
+# Build
+RUN npm run build
+
+# Runtime
+FROM node:20-alpine
+WORKDIR /app
+COPY --from=base /app/node_modules ./node_modules
+COPY --from=base /app/packages ./packages
+COPY --from=base /app/services/inventory-service/dist ./services/inventory-service/dist
+COPY --from=base /app/services/inventory-service/prisma ./services/inventory-service/prisma
+COPY --from=base /app/services/inventory-service/node_modules ./services/inventory-service/node_modules
+WORKDIR /app/services/inventory-service
+EXPOSE 3005
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/main"]

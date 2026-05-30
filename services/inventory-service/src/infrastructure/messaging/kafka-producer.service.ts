@@ -4,7 +4,16 @@ import { Kafka, Producer } from 'kafkajs';
 export class KafkaProducerService implements OnModuleInit, OnModuleDestroy {
   private producer!: Producer;
   async onModuleInit() {
-    this.producer = new Kafka({ clientId: 'inventory-service', brokers: (process.env['KAFKA_BROKERS'] ?? 'localhost:9092').split(',') }).producer({ idempotent: true });
+    const brokers = (process.env['KAFKA_BROKERS'] ?? 'localhost:9092').split(',');
+    const ssl = process.env['KAFKA_SSL'] === 'true';
+    const sasl = process.env['KAFKA_USERNAME']
+      ? {
+          mechanism: (process.env['KAFKA_SASL_MECHANISM'] ?? 'scram-sha-256') as 'scram-sha-256' | 'scram-sha-512',
+          username: process.env['KAFKA_USERNAME'],
+          password: process.env['KAFKA_PASSWORD'] ?? '',
+        }
+      : undefined;
+    this.producer = new Kafka({ clientId: 'inventory-service', brokers, ssl, sasl }).producer({ idempotent: true });
     await this.producer.connect();
   }
   async onModuleDestroy() { await this.producer.disconnect(); }

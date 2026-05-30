@@ -14,6 +14,8 @@ async function bootstrap(): Promise<void> {
     .setDescription('OPC-UA, MQTT/Sparkplug B and ERP/B2MML adapters (PS-IT)')
     .setVersion('1.0.0').addBearerAuth().build();
   SwaggerModule.setup('api/v1/docs', app, SwaggerModule.createDocument(app, config));
+  const fastify = app.getHttpAdapter().getInstance();
+  fastify.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
   await app.listen(process.env['PORT'] ?? 3007, '0.0.0.0');
   console.log('integration-service started');
 }

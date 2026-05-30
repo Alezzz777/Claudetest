@@ -1,34 +1,31 @@
 FROM node:20-alpine AS base
 WORKDIR /app
-RUN apk add --no-cache openssl
 
-# ── Install dependencies ──────────────────────────────────────────────────────
-FROM base AS deps
-COPY package*.json ./
-COPY packages/shared/package*.json ./packages/shared/
-COPY services/production-service/package*.json ./services/production-service/
-RUN npm ci --workspace=packages/shared --workspace=services/production-service
+# Copy root workspace files
+COPY package.json package-lock.json* tsconfig.base.json ./
+COPY packages/ ./packages/
 
-# ── Build ─────────────────────────────────────────────────────────────────────
-FROM base AS builder
-COPY --from=deps /app/node_modules ./node_modules
-COPY tsconfig.base.json ./
-COPY packages/shared ./packages/shared
-COPY services/production-service ./services/production-service
-RUN npm run build --workspace=packages/shared
-RUN npm run build --workspace=services/production-service
-RUN cd services/production-service && npx prisma generate
+# Copy service files
+COPY services/production-service/ ./services/production-service/
 
-# ── Runtime ───────────────────────────────────────────────────────────────────
-FROM base AS runtime
-ENV NODE_ENV=production
-COPY --from=builder /app/services/production-service/dist ./dist
-COPY --from=builder /app/services/production-service/prisma ./prisma
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/packages/shared/dist ./packages/shared/dist
+# Install all workspace deps from root
+RUN npm install --ignore-scripts
 
-EXPOSE 3001
-HEALTHCHECK --interval=15s --timeout=5s --start-period=30s \
-  CMD wget -qO- http://localhost:3001/api/v1/health || exit 1
+# Generate Prisma client
+WORKDIR /app/services/production-service
+RUN npx prisma generate
 
-CMD ["node", "dist/main.js"]
+# Build
+RUN npm run build
+
+# Runtime
+FROM node:20-alpine
+WORKDIR /app
+COPY --from=base /app/node_modules ./node_modules
+COPY --from=base /app/packages ./packages
+COPY --from=base /app/services/production-service/dist ./services/production-service/dist
+COPY --from=base /app/services/production-service/prisma ./services/production-service/prisma
+COPY --from=base /app/services/production-service/node_modules ./services/production-service/node_modules
+WORKDIR /app/services/production-service
+EXPOSE 3003
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/main"]

@@ -18,6 +18,9 @@ async function bootstrap(): Promise<void> {
     .build();
   SwaggerModule.setup('api/v1/docs', app, SwaggerModule.createDocument(app, config));
 
+  const fastify = app.getHttpAdapter().getInstance();
+  fastify.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
+
   await app.listen(process.env['PORT'] ?? 3002, '0.0.0.0');
 }
 

@@ -11,6 +11,8 @@ async function bootstrap(): Promise<void> {
   app.setGlobalPrefix('api/v1');
   const config = new DocumentBuilder().setTitle('Scheduling Service API').setDescription('Production schedule, capacity planning and re-planning (PS-SC)').setVersion('1.0.0').addBearerAuth().build();
   SwaggerModule.setup('api/v1/docs', app, SwaggerModule.createDocument(app, config));
+  const fastify = app.getHttpAdapter().getInstance();
+  fastify.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
   await app.listen(process.env['PORT'] ?? 3006, '0.0.0.0');
 }
 bootstrap().catch(console.error);

@@ -40,6 +40,9 @@ async function bootstrap(): Promise<void> {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api/v1/docs', app, document);
 
+  const fastify = app.getHttpAdapter().getInstance();
+  fastify.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
+
   const port = process.env['PORT'] ?? 3001;
   await app.listen(port, '0.0.0.0');
   console.log(`production-service listening on port ${port}`);
