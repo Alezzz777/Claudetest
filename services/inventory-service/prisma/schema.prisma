@@ -1,0 +1,91 @@
+generator client { provider = "prisma-client-js" }
+datasource db { provider = "postgresql"; url = env("DATABASE_URL") }
+
+model EventStore {
+  id            String   @id @default(uuid())
+  aggregateId   String
+  aggregateType String
+  eventType     String
+  sequence      Int
+  payload       Json
+  correlationId String?
+  causationId   String?
+  createdAt     DateTime @default(now())
+  @@unique([aggregateId, sequence])
+  @@index([aggregateId])
+  @@map("event_store")
+}
+
+model OutboxEvent {
+  id           String   @id @default(uuid())
+  topic        String
+  partitionKey String
+  payload      Json
+  sent         Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  @@index([sent, createdAt])
+  @@map("outbox_events")
+}
+
+model Outbox {
+  id            String    @id
+  eventType     String
+  aggregateType String
+  aggregateId   String
+  payload       Json
+  topic         String
+  partitionKey  String
+  status        String    @default("PENDING")
+  attempts      Int       @default(0)
+  createdAt     DateTime  @default(now())
+  processedAt   DateTime?
+  lastError     String?
+  @@index([status, attempts])
+  @@map("outbox")
+}
+
+model ProcessedEvent {
+  eventId     String   @id
+  processedAt DateTime @default(now())
+  @@map("processed_events")
+}
+
+model LotProjection {
+  lotId        String   @id
+  lotNo        String   @unique
+  materialCode String
+  quantity     Float
+  reservedQty  Float    @default(0)
+  locationId   String
+  status       String   @default("AVAILABLE")
+  tenantId     String
+  createdAt    DateTime
+  updatedAt    DateTime @updatedAt
+  @@index([materialCode])
+  @@index([status])
+  @@index([locationId])
+  @@map("lot_projections")
+}
+
+model ReservationProjection {
+  reservationId String   @id
+  lotId         String
+  orderId       String
+  quantity      Float
+  status        String   @default("ACTIVE")
+  createdAt     DateTime @default(now())
+  fulfilledAt   DateTime?
+  @@index([orderId])
+  @@map("reservation_projections")
+}
+
+model WipProjection {
+  id           String   @id @default(uuid())
+  orderId      String   @unique
+  materialCode String
+  quantity     Float
+  locationId   String
+  updatedAt    DateTime @updatedAt
+  @@index([orderId])
+  @@map("wip_projections")
+}

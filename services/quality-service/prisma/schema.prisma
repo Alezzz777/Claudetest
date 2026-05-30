@@ -1,0 +1,85 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model EventStore {
+  id            String   @id @default(uuid())
+  aggregateId   String
+  aggregateType String
+  eventType     String
+  sequence      Int
+  payload       Json
+  correlationId String?
+  causationId   String?
+  createdAt     DateTime @default(now())
+
+  @@unique([aggregateId, sequence])
+  @@index([aggregateId])
+  @@map("event_store")
+}
+
+model OutboxEvent {
+  id           String    @id @default(uuid())
+  topic        String
+  partitionKey String
+  payload      Json
+  sent         Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+
+  @@index([sent, createdAt])
+  @@map("outbox_events")
+}
+
+model ProcessedEvent {
+  eventId     String   @id
+  processedAt DateTime @default(now())
+  @@map("processed_events")
+}
+
+model QualityPlanProjection {
+  planId      String   @id
+  productCode String
+  status      String
+  specJson    Json
+  createdAt   DateTime
+  updatedAt   DateTime @updatedAt
+
+  @@map("quality_plan_projections")
+}
+
+model MeasurementProjection {
+  id          String   @id @default(uuid())
+  orderId     String
+  operationId String
+  parameterId String
+  value       Float
+  lsl         Float
+  usl         Float
+  inSpec      Boolean
+  recordedBy  String
+  recordedAt  DateTime
+
+  @@index([orderId])
+  @@index([inSpec])
+  @@map("measurement_projections")
+}
+
+model NonConformanceProjection {
+  ncId        String    @id
+  orderId     String
+  lotId       String?
+  description String
+  status      String
+  raisedBy    String
+  raisedAt    DateTime
+  closedAt    DateTime?
+
+  @@index([orderId])
+  @@index([status])
+  @@map("nonconformance_projections")
+}

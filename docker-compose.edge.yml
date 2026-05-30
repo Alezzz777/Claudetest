@@ -1,0 +1,93 @@
+version: '3.9'
+# Edge node compose — runs at factory floor level (L2)
+# Provides local MQTT broker, buffering DB, and edge agent that bridges to cloud Kafka
+
+networks:
+  edge-net:
+    driver: bridge
+
+volumes:
+  edge-mosquitto-data:
+  edge-pg-data:
+
+services:
+  # ─── Local MQTT broker (Mosquitto) ────────────────────────────────────────
+  edge-mosquitto:
+    image: eclipse-mosquitto:2.0
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./infrastructure/mosquitto/edge-mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - edge-mosquitto-data:/mosquitto/data
+    networks: [edge-net]
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_pub -t '$$SYS/health' -n -q 0 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ─── Local PostgreSQL buffer ───────────────────────────────────────────────
+  # Stores incoming Sparkplug/OPC-UA readings before forwarding to cloud
+  edge-postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: edge_buffer
+      POSTGRES_USER: edge
+      POSTGRES_PASSWORD: edge_secret
+    ports:
+      - "5440:5432"
+    volumes:
+      - edge-pg-data:/var/lib/postgresql/data
+      - ./infrastructure/edge/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks: [edge-net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U edge -d edge_buffer"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ─── Edge Agent (integration-service in edge mode) ────────────────────────
+  # Connects to local MQTT, reads OPC-UA, buffers locally, forwards to Kafka
+  edge-agent:
+    image: mes-platform/integration-service:latest
+    restart: unless-stopped
+    depends_on:
+      edge-mosquitto:
+        condition: service_healthy
+      edge-postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: edge
+      # Local MQTT
+      MQTT_BROKER_URL: mqtt://edge-mosquitto:1883
+      MQTT_CLIENT_ID: edge-agent-01
+      # Local buffer DB
+      DATABASE_URL: postgresql://edge:edge_secret@edge-postgres:5432/edge_buffer
+      # Cloud Kafka (configure with actual cloud endpoint)
+      KAFKA_BROKERS: ${CLOUD_KAFKA_BROKERS:-kafka:9092}
+      KAFKA_CLIENT_ID: edge-agent-01
+      KAFKA_GROUP_ID: edge-agents
+      # UNS site configuration
+      UNS_ENTERPRISE: acme-corp
+      UNS_SITE: ${SITE_ID:-plant-01}
+      UNS_AREA: ${AREA_ID:-assembly}
+      # Edge mode: buffer events locally if cloud unreachable
+      EDGE_MODE: "true"
+      EDGE_BUFFER_MAX_EVENTS: "50000"
+      EDGE_FLUSH_INTERVAL_MS: "5000"
+      # OPC UA server (local SCADA)
+      OPCUA_ENDPOINT_URL: ${OPCUA_ENDPOINT_URL:-opc.tcp://localhost:4840}
+      # OpenTelemetry
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_ENDPOINT:-http://otel-collector:4317}
+      OTEL_SERVICE_NAME: edge-agent
+    ports:
+      - "3008:3008"
+    networks: [edge-net]
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
